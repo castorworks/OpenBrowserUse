@@ -144,5 +144,21 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const server = app.listen(port, '127.0.0.1', () => console.log(`Open Browser Use ready: http://127.0.0.1:${port}`));
   relay.attach(server, port);
   server.on('error', error => { console.error(error.message); process.exitCode = 1; });
-  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { try { agent.control('stop'); } catch {} await agent.promise; await agent.closeBrowser(); await agent.closeLogin(); agent.sessions.close(); server.close(); });
+  let stopping = false;
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => {
+    if (stopping) return;
+    stopping = true;
+    try { agent.control('stop'); } catch {}
+    try {
+      await agent.promise;
+      await agent.closeBrowser();
+      await agent.closeLogin();
+    } finally {
+      agent.sessions.close();
+      relay.close();
+      server.close();
+      // SSE streams also outlive server.close(); end them so clients reconnect.
+      server.closeAllConnections();
+    }
+  });
 }

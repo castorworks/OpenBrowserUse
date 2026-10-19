@@ -97,6 +97,18 @@ test('extension pairs with the relay only with the right token', { skip: !execut
   await panel.waitForFunction(() => document.getElementById('status').textContent === '已连接');
   const frame = await (await panel.waitForSelector('#workbench:not([hidden])')).contentFrame();
   await frame.waitForFunction(() => document.getElementById('connection')?.textContent === '本地服务已连接');
+  await frame.waitForFunction(() => document.getElementById('extension-status')?.textContent.startsWith('扩展已连接'));
+  const workbench = await chrome.newPage();
+  await workbench.goto(origin);
+  await workbench.waitForFunction(() => document.getElementById('extension-status')?.textContent.startsWith('扩展已连接'));
+  relay.extension.ws.close(1001, 'Reconnect test');
+  await panel.waitForFunction(() => document.getElementById('status').textContent === '未连接');
+  await workbench.waitForFunction(() => document.getElementById('extension-status').textContent === '扩展未连接');
+  await panel.waitForFunction(() => document.getElementById('status').textContent === '已连接');
+  const reloaded = await (await panel.waitForSelector('#workbench:not([hidden])')).contentFrame();
+  await reloaded.waitForFunction(() => document.getElementById('extension-status')?.textContent.startsWith('扩展已连接'));
+  await workbench.waitForFunction(() => document.getElementById('extension-status').textContent.startsWith('扩展已连接'));
+  await workbench.close();
   await panel.close();
 });
 
