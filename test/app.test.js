@@ -1,12 +1,15 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { createApp } from '../server.js';
+import { Agent } from '../lib/agent.js';
 import { apiEndpoint, OpenAIProvider } from '../lib/providers/openai.js';
 import { AnthropicProvider } from '../lib/providers/anthropic.js';
-import { allowedURL } from '../lib/browser/url.js';
+import { allowedURL, localCDPURL } from '../lib/browser/url.js';
 import { detectChannel, launchChannel } from '../lib/browser/channel.js';
 import { BrowserSession } from '../lib/browser/session.js';
 import { TOOLS, getTool, jsonSchema, parseInput } from '../lib/tools/index.js';
@@ -91,7 +94,13 @@ test('URL guard, endpoints, key names and tool schemas', () => {
   assert.throws(() => allowedURL('file:///etc/passwd', origin));
   assert.throws(() => allowedURL(origin + '/api/state', origin));
   assert.throws(() => allowedURL('http://10.0.0.1', origin));
-  assert.throws(() => allowedURL('http://2130706433', origin));
+  assert.equal(allowedURL('http://2130706433:3000', origin), 'http://127.0.0.1:3000/', 'localhost dev servers allowed by default');
+  assert.throws(() => allowedURL('http://localhost:3000', origin, { allowLocalhost: false }), /localhost/);
+  for (const own of [`http://localhost:${port}/api/state`, `http://0.0.0.0:${port}/api/state`, `http://[::1]:${port}/`, `http://127.0.0.2:${port}/demo`]) assert.throws(() => allowedURL(own, origin), /工作台/, own);
+  assert.equal(allowedURL('http://192.168.1.5/', origin, { allowLocalhost: true, allowPrivateNetwork: true }), 'http://192.168.1.5/');
+  assert.equal(localCDPURL('http://127.0.0.1:9222/'), 'http://127.0.0.1:9222');
+  assert.throws(() => localCDPURL('http://example.com:9222'));
+  assert.throws(() => localCDPURL('http://127.0.0.1'));
   assert.equal(allowedURL(origin + '/demo', origin), origin + '/demo');
   assert.equal(apiEndpoint('https://example.com/v1/'), 'https://example.com/v1/chat/completions');
   assert.throws(() => apiEndpoint('http://example.com/v1'));
@@ -155,6 +164,51 @@ test('read_page reaches iframes and shadow DOM; refs stay stable and act across 
   } finally { await session.close(); }
 });
 
+test('persistent profile keeps cookies across sessions', async () => {
+  const profileDir = await mkdtemp(join(tmpdir(), 'obu-profile-'));
+  try {
+    const first = new BrowserSession({ demoOrigin: origin, headless: true, mode: 'persistent', profileDir });
+    await first.open(); await first.navigate(origin + '/demo');
+    await first.current().evaluate(() => { document.cookie = 'obu=kept; max-age=3600; path=/'; });
+    await first.close();
+    const second = new BrowserSession({ demoOrigin: origin, headless: true, mode: 'persistent', profileDir });
+    await second.open(); await second.navigate(origin + '/demo');
+    assert.match(await second.current().evaluate(() => document.cookie), /obu=kept/);
+    await second.close();
+  } finally { await rm(profileDir, { recursive: true, force: true }); }
+});
+
+test('login browser opens the persistent profile and blocks persistent tasks until closed', async () => {
+  const profileDir = await mkdtemp(join(tmpdir(), 'obu-login-'));
+  const loginAgent = new Agent(origin, { headless: true, profileDir });
+  try {
+    await loginAgent.openLogin(origin + '/demo', { mode: 'persistent' });
+    assert.match(loginAgent.login.current().url(), /\/demo$/);
+    await assert.rejects(loginAgent.openLogin(undefined, {}), /已经打开/);
+    await assert.rejects(loginAgent.start({ goal: 'x', startURL: origin + '/demo', maxSteps: 1 }, { provider: 'openai', browser: { mode: 'persistent' } }), /登录浏览器/);
+    await loginAgent.closeLogin();
+    assert.equal(loginAgent.login, null);
+  } finally { await loginAgent.closeLogin(); await rm(profileDir, { recursive: true, force: true }); }
+});
+
+test('CDP attach uses only its own tabs and leaves the external browser running', async () => {
+  const cdpPort = 14330;
+  const external = await chromium.launch({ headless: true, ...launchChannel(detectChannel()), args: [`--remote-debugging-port=${cdpPort}`] });
+  try {
+    const userPage = await external.newPage(); await userPage.setContent('<title>user tab</title><p>mine</p>');
+    const session = new BrowserSession({ demoOrigin: origin, headless: true, mode: 'cdp', cdpURL: `http://127.0.0.1:${cdpPort}` });
+    await session.open(); await session.navigate(origin + '/demo');
+    assert.equal(session.pages().length, 1);
+    assert.ok(!session.tabs().some(t => t.url === userPage.url() && t.url !== session.current().url()));
+    assert.match(await getTool('read_page').run({ filter: 'interactive', max_chars: 20000 }, { browser: session }).then(r => r.text), /搜索产品/);
+    await assert.rejects(session.navigate(`http://localhost:${port}/api/state`), /工作台/);
+    await session.close();
+    assert.ok(external.isConnected(), 'external browser still running');
+    assert.equal(userPage.isClosed(), false);
+    assert.equal(await userPage.title(), 'user tab');
+  } finally { await external.close(); }
+});
+
 test('API blocks foreign origins, validates input and never returns a configured key', async () => {
   const foreign = await fetch(origin + '/api/config', { method: 'POST', headers: { ...headers, Origin: 'https://evil.example' }, body: '{}' });
   assert.equal(foreign.status, 403);
@@ -164,6 +218,12 @@ test('API blocks foreign origins, validates input and never returns a configured
   const changed = await post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/other`, model: 'test', apiKey: '' });
   assert.equal(changed.body.hasKey, false);
   await configureOpenAI();
+  assert.equal((await post('browser', { mode: 'cdp', cdpURL: 'http://example.com:9222', allowLocalhost: true, allowPrivateNetwork: false })).status, 400);
+  const browserCfg = await post('browser', { mode: 'ephemeral', cdpURL: '', allowLocalhost: false, allowPrivateNetwork: false });
+  assert.equal(browserCfg.body.browser.allowLocalhost, false);
+  const blocked = await start({ startURL: 'http://localhost:3000' });
+  assert.equal(blocked.status, 400); assert.match(blocked.body.error, /localhost/);
+  await post('browser', { mode: 'ephemeral', cdpURL: '', allowLocalhost: true, allowPrivateNetwork: false });
   const switched = await post('config', { provider: 'anthropic', model: 'claude-opus-5-5' });
   assert.equal(switched.body.hasKey, false, 'switching provider drops the key');
   await configureOpenAI();
@@ -260,6 +320,12 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   await page.locator('#settings').evaluate(el => { el.open = true; });
   await page.selectOption('#provider', 'anthropic');
   assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), false);
+  await page.locator('#browser-settings').evaluate(el => { el.open = true; });
+  await page.selectOption('#browser-mode', 'cdp');
+  assert.equal(await page.locator('#cdp-url').isVisible(), true); assert.equal(await page.locator('#login-open').isVisible(), false);
+  await page.selectOption('#browser-mode', 'persistent');
+  assert.equal(await page.locator('#login-open').isVisible(), true);
+  await page.screenshot({ path: 'artifacts/browser-settings.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await page.screenshot({ path: 'artifacts/mobile.png', fullPage: true });

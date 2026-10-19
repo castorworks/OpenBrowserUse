@@ -26,6 +26,14 @@
           <label class="check provider-openai"><input id="vision" type="checkbox">发送截图（需模型支持视觉）</label>
           <p class="hint">任务、网页文字和截图会发送给所选模型服务。Key 不写入磁盘；切换服务类型或 Base URL 时需重新填写。Anthropic 留空 Key 时使用 ANTHROPIC_API_KEY 或 ant auth login 的凭据。</p><button class="secondary" id="save-config">保存配置</button>
         </div></details>
+        <details class="card settings" id="browser-settings"><summary><span>浏览器设置</span><span id="browser-badge">独立会话</span></summary><div class="settings-content">
+          <label for="browser-mode">浏览器</label><select id="browser-mode"><option value="ephemeral">独立会话（每次全新，不保留登录）</option><option value="persistent">使用持久化浏览器配置（保留登录）</option><option value="cdp">连接我正在运行的 Chrome（CDP）</option></select>
+          <div class="browser-persistent"><p class="hint">专用配置保存在本机，与个人 Chrome 分开。先打开登录浏览器手动登录需要的网站，关闭后再执行任务。</p><div class="decision-buttons"><button class="secondary" id="login-open">打开登录浏览器</button><button class="secondary" id="login-close" hidden>关闭登录浏览器</button></div></div>
+          <div class="browser-cdp"><label for="cdp-url">CDP 地址</label><input id="cdp-url" type="url" placeholder="http://127.0.0.1:9222"><p class="hint">用 --remote-debugging-port=9222 启动 Chrome。代理只使用并关闭它自己打开的标签页，不会关闭你的浏览器。</p></div>
+          <label class="check"><input id="allow-localhost" type="checkbox">允许访问 localhost（本机开发服务器）</label>
+          <label class="check"><input id="allow-private" type="checkbox">允许访问内网地址（192.168.x.x 等）</label>
+          <p class="hint">工作台自身的地址始终禁止访问。</p><button class="secondary" id="save-browser">保存浏览器设置</button>
+        </div></details>
       </div>
       <div class="right-column">
         <section class="card viewer"><div class="section-head"><h2><span class="live-dot"></span>浏览器视图</h2><span id="status" class="status">就绪</span></div><div class="address-bar"><span class="traffic"><i></i><i></i><i></i></span><span id="page-url">等待新任务</span><span>↗</span></div>

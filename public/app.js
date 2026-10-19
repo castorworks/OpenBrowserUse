@@ -15,7 +15,18 @@ function syncProvider() {
   $('base-url-hint').textContent = anthropic ? '（可选）' : '（含 /v1，不含 /chat/completions）';
   $('model').placeholder = anthropic ? '例如 claude-opus-5-5' : '服务商提供的模型 ID';
 }
+const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', cdp: '连接 Chrome' };
+function syncBrowserMode() {
+  const mode = $('browser-mode').value;
+  document.querySelectorAll('.browser-persistent').forEach(el => el.hidden = mode !== 'persistent');
+  document.querySelectorAll('.browser-cdp').forEach(el => el.hidden = mode !== 'cdp');
+}
+function showBrowserConfig(b) {
+  $('browser-mode').value = b.mode; $('cdp-url').value = b.cdpURL || ''; $('allow-localhost').checked = b.allowLocalhost; $('allow-private').checked = b.allowPrivateNetwork;
+  $('browser-badge').textContent = browserModes[b.mode]; syncBrowserMode();
+}
 function showConfig(config) {
+  showBrowserConfig(config.browser);
   $('provider').value = config.provider; $('base-url').value = config.baseURL; $('model').value = config.model;
   $('effort').value = config.effort; $('vision').checked = config.vision; syncProvider();
   $('model-badge').textContent = config.model || '待配置';
@@ -35,6 +46,8 @@ function render(state) {
   if (!configured) { showConfig(state.config); configured = true; }
   const t = state.task, busy = state.busy;
   for (const id of ['run', 'demo', 'save-config']) $(id).disabled = busy;
+  $('save-browser').disabled = busy || Boolean(t?.sessionOpen); $('login-open').disabled = busy || Boolean(t?.sessionOpen);
+  $('login-open').hidden = state.loginOpen; $('login-close').hidden = !state.loginOpen;
   $('pause').disabled = !t || !['running', 'starting'].includes(t.status);
   $('stop').disabled = !(busy || t?.sessionOpen) || t?.status === 'stopping';
   $('resume').hidden = t?.status !== 'paused'; $('pause').hidden = t?.status === 'paused';
@@ -73,6 +86,13 @@ handle('save-config', async () => {
   const config = await api('config', { provider: $('provider').value, baseURL: $('base-url').value.trim(), model: $('model').value.trim(), apiKey: $('api-key').value.trim(), clearKey: $('clear-key').checked, effort: $('effort').value, vision: $('vision').checked });
   $('api-key').value = ''; $('clear-key').checked = false; showConfig(config); toast('配置已保存到本地服务内存。');
 });
+$('browser-mode').addEventListener('change', syncBrowserMode);
+handle('save-browser', async () => {
+  const config = await api('browser', { mode: $('browser-mode').value, cdpURL: $('cdp-url').value.trim(), allowLocalhost: $('allow-localhost').checked, allowPrivateNetwork: $('allow-private').checked });
+  showBrowserConfig(config.browser); toast('浏览器设置已保存。');
+});
+handle('login-open', () => api('login', { action: 'open', url: $('start-url').value.trim() || undefined }));
+handle('login-close', () => api('login', { action: 'close' }));
 async function start(demo) {
   if (!demo && !current?.config.model) { $('settings').open = true; $('model').focus(); throw new Error('先填写模型设置并保存，再开始 AI 任务。'); }
   const goal = demo ? '在演示商店搜索键盘，并读取搜索结果。' : $('goal').value.trim();

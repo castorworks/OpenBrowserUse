@@ -22,6 +22,22 @@ npm start
 
 “暂停 / 接管”会取消当前模型请求，在当前浏览器操作结束后暂停。可以直接操作浏览器窗口，然后点击“继续执行”。模型会在登录、验证码、密码或需要补充信息时用 `ask_user` 请求人工接管。模型回答后浏览器保持打开，可在“继续对话”中追问，或点击“关闭浏览器”结束会话。
 
+## 浏览器设置
+
+在“浏览器设置”中选择代理使用的浏览器：
+
+- **独立会话**（默认）：每次任务启动全新浏览器，不保留 Cookie 和登录。
+- **使用持久化浏览器配置**：专用配置目录（默认 `~/.openbrowseruse/profile`，可用 `BROWSER_PROFILE_DIR` 修改）保留登录，与个人 Chrome 分开。点击“打开登录浏览器”手动登录需要的网站，关闭后再执行任务（同一配置不能被两个窗口同时使用）。
+- **连接我正在运行的 Chrome（CDP）**：用 `--remote-debugging-port=9222` 启动 Chrome，代理连接 `http://127.0.0.1:9222`，在你的登录状态下工作。代理只读取、操作和关闭它自己打开的标签页；停止时断开连接，不关闭你的浏览器。CDP 地址只能是本机地址。
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="$HOME/.openbrowseruse/chrome-cdp"
+```
+
+（新版 Chrome 不允许对默认配置开启远程调试，需要指定单独的 `--user-data-dir`。）
+
+地址限制：“允许访问 localhost”默认开启，可让代理检查本机开发服务器；“允许访问内网地址”默认关闭。工作台自身的端口始终禁止访问（内置演示页除外）。
+
 ## 环境配置
 
 ```bash
@@ -31,7 +47,7 @@ export ANTHROPIC_API_KEY=...           # Anthropic；OpenAI 兼容服务用 MODE
 npm start
 ```
 
-浏览器按 Chrome → Edge → Playwright Chromium 的顺序自动选择，可用 `BROWSER_CHANNEL=chrome|msedge|chromium` 指定。端口由 `PORT` 配置，默认 4318，仅绑定 `127.0.0.1`。不要把真实 Key 写入仓库。
+浏览器按 Chrome → Edge → Playwright Chromium 的顺序自动选择，可用 `BROWSER_CHANNEL=chrome|msedge|chromium` 指定。浏览器设置的默认值可用 `BROWSER_MODE=ephemeral|persistent|cdp`、`BROWSER_CDP_URL`、`BROWSER_PROFILE_DIR`、`BROWSER_ALLOW_LOCALHOST=0`、`BROWSER_ALLOW_PRIVATE=1` 设置。端口由 `PORT` 配置，默认 4318，仅绑定 `127.0.0.1`。不要把真实 Key 写入仓库。
 
 ## 实现结构
 
@@ -76,9 +92,10 @@ npm test
 
 ## 当前边界
 
-- 每个任务新建独立浏览器会话，不复用个人浏览器的 Cookie，不持久化登录（计划中的下一阶段）。网页对话框自动关闭，下载不被接受，文件上传和密码输入交给人工。
+- 网页对话框自动关闭，下载不被接受，文件上传和密码输入交给人工。持久化配置和 CDP 模式下，代理可以使用这些登录状态执行操作，请只对信任的任务开启自动执行。
+- CDP 模式下，代理标签页打开的新弹出窗口，其第一个请求可能在地址限制生效前发出。
 - 封闭 Shadow DOM 和纯 Canvas 页面没有 ref，需要截图 + 坐标操作。
 - 模型可见任务、网页文字、截图和工具结果。请按所选服务商的数据处理方式选择浏览内容。
 - 默认交互确认可以控制逐步执行；自动模式依赖模型判断，不能保证识别全部敏感操作。导航本身也可能引发站点行为。
-- 限制 HTTP(S)、拦截常见私网字面地址、阻止受控浏览器访问控制台 API，并验证控制台请求来源。这不是针对恶意网站的完整网络沙箱。不要对公网暴露此服务。
+- 限制 HTTP(S)、按设置拦截本机和常见私网字面地址、阻止受控浏览器访问工作台端口，并验证控制台请求来源。这不是针对恶意网站的完整网络沙箱。不要对公网暴露此服务。
 - 单任务、内存状态；没有账号体系、长期任务库或生产部署配置。工作台每秒轮询状态，尚未流式推送。
