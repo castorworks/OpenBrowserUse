@@ -1,0 +1,23 @@
+:root { --bg: #fff; --panel: #fafafa; --border: #e4e4e7; --text: #18181b; --muted: #71717a; --accent: #1f6f5c; --accent-text: #fff; --ok-bg: #e8f3ef; --warn: #b45309; --warn-bg: #fef6e7; --danger: #dc2626;
+  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--text); background: var(--bg); }
+@media (prefers-color-scheme: dark) { :root { --bg: #16171a; --panel: #1b1c20; --border: #2a2b31; --text: #ececef; --muted: #a1a1aa; --accent: #3fae8f; --accent-text: #08130f; --ok-bg: #15302a; --warn: #f0b04a; --warn-bg: #2d2414; --danger: #f87171; } }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { display: flex; flex-direction: column; }
+[hidden] { display: none !important; }
+header { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; border-bottom: 1px solid var(--border); flex: none; }
+header strong { flex: 1; font-size: 13px; }
+.pill { padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--warn-bg); color: var(--warn); }
+.pill.connected { background: var(--ok-bg); color: var(--accent); }
+.link { border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.link:hover { color: var(--text); }
+form { padding: 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
+form p { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+label { display: block; margin: 10px 0 4px; font-size: 12px; font-weight: 600; }
+input { width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font: inherit; }
+input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+button[type=submit] { width: 100%; margin-top: 12px; height: 32px; border: 0; border-radius: 7px; background: var(--accent); color: var(--accent-text); font: inherit; font-weight: 600; cursor: pointer; }
+.error { margin-top: 8px !important; color: var(--danger) !important; }
+iframe { flex: 1; width: 100%; border: 0; }
+.empty { padding: 24px 16px; color: var(--muted); text-align: center; }
+code { padding: 1px 5px; border-radius: 4px; background: var(--panel); border: 1px solid var(--border); }

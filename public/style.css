@@ -252,6 +252,10 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .drawer-panel .btn-block { margin-top: 4px; }
 .callout { margin-bottom: 16px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-2); }
 .callout p { margin: 0 0 10px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+code { padding: 1px 5px; border-radius: 4px; background: var(--hover); font-family: var(--mono); font-size: 12px; }
+.token-row { display: flex; gap: 8px; }
+.token-row input { font-family: var(--mono); font-size: 12px; }
+.ext-status { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: var(--text-2); }
 #blocked-sites { font-family: var(--mono); font-size: 12px; }
 .grant-list { border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .grant-list > p { margin: 0; padding: 10px 12px; }

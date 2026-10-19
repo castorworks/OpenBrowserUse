@@ -52,6 +52,7 @@ npm start
 
 - **独立会话**（默认）：每次任务启动全新浏览器，不保留 Cookie 和登录。
 - **使用持久化浏览器配置**：专用配置目录（默认 `~/.openbrowseruse/profile`，可用 `BROWSER_PROFILE_DIR` 修改）保留登录，与个人 Chrome 分开。点击“打开登录浏览器”手动登录需要的网站，关闭后再执行任务（同一配置不能被两个窗口同时使用）。
+- **Chrome 扩展（推荐）**：代理在你日常使用的 Chrome 里工作，使用你的登录状态，类似 Claude in Chrome。见下一节。
 - **连接我正在运行的 Chrome（CDP）**：用 `--remote-debugging-port=9222` 启动 Chrome，代理连接 `http://127.0.0.1:9222`，在你的登录状态下工作。代理只读取、操作和关闭它自己打开的标签页；停止时断开连接，不关闭你的浏览器。CDP 支持本机或远程 HTTP(S)/WS(S) 地址。
 
 ```bash
@@ -61,6 +62,24 @@ npm start
 （新版 Chrome 不允许对默认配置开启远程调试，需要指定单独的 `--user-data-dir`。）
 
 地址访问不受本地应用限制，包括 localhost、内网和工作台地址；旧地址权限选项不再生效。
+
+## Chrome 扩展
+
+`extension/` 是一个 Manifest V3 扩展，让代理在你自己的 Chrome 里工作：
+
+1. 运行 `npm start`。
+2. 打开 `chrome://extensions`，开启“开发者模式”，点“加载已解压的扩展程序”，选择项目里的 `extension` 文件夹（需要 Chrome 125+）。
+3. 在工作台“设置 → 浏览器”中选择“Chrome 扩展”，保存，复制“配对令牌”。
+4. 点 Chrome 工具栏上的 Open Browser Use 图标打开侧边栏，点“配对”，粘贴令牌并保存。连接成功后侧边栏里就是工作台，可以直接在侧边栏下达任务。
+
+工作方式：扩展通过 WebSocket 连接本机服务（`/relay/extension`，需要令牌，并且只接受 `chrome-extension://` 来源）。服务端的中继把它模拟成一个 Chrome 调试端点，Playwright 照常连接，所有工具、元素引用、实时画面和权限规则都不变。扩展只为它自己打开的标签页挂上 `chrome.debugger`，这些标签页放在名为“Open Browser Use”的绿色标签组里，代理打开的弹出窗口也归入其中；你自己的标签页不会被读取、操作或关闭，即使服务端直接请求也会被扩展拒绝。停止任务时关闭代理的标签页并释放调试器。
+
+注意：
+
+- 调试期间 Chrome 会在顶部显示“正在调试此浏览器”的提示条；点“取消”会断开代理对该标签页的控制。
+- 代理标签页会模拟 1280×800 的视口，便于截图坐标和工具保持一致。
+- 扩展尚未上架 Chrome 应用商店，需要以开发者模式加载。令牌保存在 `~/.openbrowseruse/extension-token`，删除后重启服务会生成新令牌。
+- 扩展模式只能由工作台使用；MCP 服务器暂不支持（`BROWSER_MODE=extension` 时按独立会话处理）。
 
 ## 给 Claude Code / Codex 使用（MCP）
 
@@ -94,7 +113,7 @@ export ANTHROPIC_API_KEY=...           # Anthropic；OpenAI 兼容服务用 MODE
 npm start
 ```
 
-浏览器按 Chrome → Edge → Playwright Chromium 的顺序自动选择，可用 `BROWSER_CHANNEL=chrome|msedge|chromium` 指定。浏览器设置的默认值可用 `BROWSER_MODE=ephemeral|persistent|cdp`、`BROWSER_CDP_URL`、`BROWSER_PROFILE_DIR` 设置。端口由 `PORT` 配置，默认 4318，仅绑定 `127.0.0.1`。不要把真实 Key 写入仓库。
+浏览器按 Chrome → Edge → Playwright Chromium 的顺序自动选择，可用 `BROWSER_CHANNEL=chrome|msedge|chromium` 指定。浏览器设置的默认值可用 `BROWSER_MODE=ephemeral|persistent|extension|cdp`、`BROWSER_CDP_URL`、`BROWSER_PROFILE_DIR` 设置。端口由 `PORT` 配置，默认 4318，仅绑定 `127.0.0.1`。不要把真实 Key 写入仓库。
 
 ## 实现结构
 
@@ -103,6 +122,8 @@ server.js                本地 HTTP API、配置、请求来源检查
 bin/mcp.js               MCP 服务器入口（stdio），实现在 lib/mcp.js
 lib/agent.js             工具调用循环、确认、暂停/恢复、追问、执行中补充、实时画面、停止
 lib/sessions.js          会话保存（node:sqlite）
+lib/extension/           Chrome 扩展中继（模拟 CDP 端点）和配对令牌
+extension/               Chrome 扩展（MV3：后台连接、chrome.debugger、标签组、侧边栏）
 lib/prompt.js            系统提示词（固定内容，便于缓存）
 lib/providers/           anthropic.js（SDK 流式、自适应思考、拒绝回退）、openai.js、demo.js
 lib/tools/               read_page / find / get_page_text、computer、navigate / tabs / form_input、控制台/网络/javascript
@@ -136,7 +157,9 @@ Anthropic 请求使用 `messages.stream`，开启自适应思考；支持的模�
 npm test
 ```
 
-测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON 和 Anthropic SSE 流），不消耗模型额度。覆盖 MCP 服务器（stdio 客户端实测）、SSE 实时状态和画面、执行中补充、会话保存与回放、工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框输入、来源检查、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、演示和移动端布局。截图输出在 `artifacts/`。
+测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON 和 Anthropic SSE 流），不消耗模型额度。覆盖 Chrome 扩展（真实加载扩展：配对、标签组隔离、实时画面、侧边栏）、MCP 服务器（stdio 客户端实测）、SSE 实时状态和画面、执行中补充、会话保存与回放、工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框输入、来源检查、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、演示和移动端布局。截图输出在 `artifacts/`。
+
+扩展测试需要能加载解压扩展的 Chromium / Chrome for Testing（正式版 Chrome 已不支持 `--load-extension`）：默认使用 Playwright 自带或缓存中的 Chromium，也可用 `OBU_TEST_CHROMIUM=<可执行文件路径>` 指定；找不到时跳过。
 
 尚未用真实 Anthropic / OpenAI Key 做端到端验证。
 

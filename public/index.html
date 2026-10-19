@@ -136,7 +136,10 @@
   </section>
 
   <section class="drawer-panel" id="browser-settings" role="tabpanel" hidden>
-    <div class="field"><label for="browser-mode">浏览器</label><select id="browser-mode"><option value="ephemeral">独立会话（每次全新，不保留登录）</option><option value="persistent">持久化配置（保留登录）</option><option value="cdp">连接我正在运行的 Chrome（CDP）</option></select></div>
+    <div class="field"><label for="browser-mode">浏览器</label><select id="browser-mode"><option value="ephemeral">独立会话（每次全新，不保留登录）</option><option value="persistent">持久化配置（保留登录）</option><option value="extension">Chrome 扩展（在你的 Chrome 中，推荐）</option><option value="cdp">连接我正在运行的 Chrome（CDP）</option></select></div>
+    <div class="callout browser-extension"><p>代理在你的 Chrome 里工作，使用你的登录状态，只操作它自己打开的“Open Browser Use”标签组。安装：打开 chrome://extensions，开启开发者模式，“加载已解压的扩展程序”选择项目里的 <code>extension</code> 文件夹；然后点扩展图标打开侧边栏，粘贴下面的配对令牌。</p>
+      <div class="field"><label for="extension-token">配对令牌</label><div class="token-row"><input id="extension-token" readonly><button class="btn" id="copy-token">复制</button></div></div>
+      <p class="ext-status"><span class="dot offline" id="extension-dot"></span><span id="extension-status">扩展未连接</span></p></div>
     <div class="callout browser-persistent"><p>专用配置保存在本机，与个人 Chrome 分开。先打开登录浏览器手动登录需要的网站，关闭后再执行任务。</p>
       <div class="button-row"><button class="btn" id="login-open">打开登录浏览器</button><button class="btn" id="login-close" hidden>关闭登录浏览器</button></div></div>
     <div class="browser-cdp"><div class="field"><label for="cdp-url">CDP 地址</label><input id="cdp-url" type="url" placeholder="http://127.0.0.1:9222"></div>

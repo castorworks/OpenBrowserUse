@@ -18,11 +18,12 @@ function syncProvider() {
   document.querySelectorAll('.provider-openai').forEach(el => el.hidden = provider === 'anthropic');
   $('base-url').placeholder = h.base; $('base-url-hint').textContent = h.hint; $('model').placeholder = h.model;
 }
-const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', cdp: '连接 Chrome' };
+const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', extension: 'Chrome 扩展', cdp: '连接 Chrome' };
 function syncBrowserMode() {
   const mode = $('browser-mode').value;
   document.querySelectorAll('.browser-persistent').forEach(el => el.hidden = mode !== 'persistent');
   document.querySelectorAll('.browser-cdp').forEach(el => el.hidden = mode !== 'cdp');
+  document.querySelectorAll('.browser-extension').forEach(el => el.hidden = mode !== 'extension');
 }
 function showBrowserConfig(b) {
   $('blocked-sites').value = (b.blockedSites || []).join('\n');
@@ -98,6 +99,11 @@ function showFrame(data) {
 }
 function render(state) {
   renderGrants(state.permissions || []);
+  if (state.extension) {
+    if ($('extension-token').value !== state.extension.token) $('extension-token').value = state.extension.token;
+    $('extension-dot').classList.toggle('offline', !state.extension.connected);
+    $('extension-status').textContent = state.extension.connected ? `扩展已连接${state.extension.browser ? ` · ${(/Chrome\/[\d.]+/.exec(state.extension.browser) || [''])[0]}` : ''}` : '扩展未连接';
+  }
   current = state;
   $('connection').textContent = '本地服务已连接'; $('connection-dot').classList.remove('offline');
   if (!configured) { showConfig(state.config); configured = true; }
@@ -220,6 +226,7 @@ async function saveBrowser(message) {
   showBrowserConfig(config.browser); toast(message);
 }
 handle('save-browser', () => saveBrowser('浏览器设置已保存。'));
+$('copy-token').onclick = async () => { try { await navigator.clipboard.writeText($('extension-token').value); toast('配对令牌已复制。'); } catch { $('extension-token').select(); } };
 handle('save-blocked', () => saveBrowser('受保护网站已保存。'));
 handle('login-open', () => api('login', { action: 'open', url: $('start-url').value.trim() || undefined }));
 handle('login-close', () => api('login', { action: 'close' }));

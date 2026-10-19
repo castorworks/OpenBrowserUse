@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark">
+  <title>Open Browser Use</title>
+  <link rel="stylesheet" href="sidepanel.css"><script src="sidepanel.js" defer></script>
+</head>
+<body>
+  <header>
+    <img src="icons/32.png" alt="" width="20" height="20">
+    <strong>Open Browser Use</strong>
+    <span id="status" class="pill">连接中</span>
+    <button id="toggle-pair" class="link" title="配对设置">配对</button>
+  </header>
+  <form id="pair" hidden>
+    <p>在工作台“设置 → 浏览器”中选择“Chrome 扩展”，复制配对令牌粘贴到这里。</p>
+    <label for="server">服务器地址</label><input id="server" value="http://127.0.0.1:4318" spellcheck="false">
+    <label for="token">配对令牌</label><input id="token" type="password" autocomplete="off" spellcheck="false">
+    <button type="submit">保存并连接</button>
+    <p id="error" class="error" hidden></p>
+  </form>
+  <iframe id="workbench" title="Open Browser Use 工作台" hidden></iframe>
+  <section id="offline" class="empty" hidden><p>没有连接到本机的 Open Browser Use 服务。</p><p>在项目目录运行 <code>npm start</code>，然后点“配对”。</p></section>
+</body>
+</html>
