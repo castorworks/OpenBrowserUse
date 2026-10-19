@@ -55,7 +55,7 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
   });
   app.use(express.json({ limit: '64kb' }));
   const publicConfig = () => ({ ...config, apiKey: undefined, hasKey: Boolean(config.apiKey), envKey: config.provider === 'anthropic' && !config.apiKey && Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN), defaults: { baseURL: DEFAULT_BASE_URLS, model: DEFAULT_MODELS } });
-  const fullState = () => ({ config: publicConfig(), task: agent.state(), busy: agent.busy, loginOpen: Boolean(agent.login), permissions: agent.permissions.list(), extension: { ...relay.status(), token: relay.token } });
+  const fullState = () => ({ config: publicConfig(), task: agent.state(), busy: agent.busy, loginOpen: Boolean(agent.login), permissions: agent.permissions.list(), extension: relay.status() });
   app.get('/api/state', (req, res) => res.json(fullState()));
   // Server-sent events: `state` whenever it changes (checked every 200 ms) and `frame` for the live view.
   app.get('/api/events', (req, res) => {
@@ -71,6 +71,9 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     if (agent.browser && agent.lastFrame) onFrame(agent.lastFrame);
     req.on('close', () => { clearInterval(timer); clearInterval(ping); clearTimeout(frameTimer); agent.frames.delete(onFrame); });
   });
+  // The pairing token is not part of the streamed state. POST means the header, JSON and origin
+  // checks above apply, so opening this address in a browser (or the agent's browser) cannot read it.
+  app.post('/api/extension/token', (req, res) => res.json({ token: relay.token }));
   app.get('/api/sessions', async (req, res) => res.json({ sessions: await agent.sessions.list() }));
   app.get('/api/sessions/:id', async (req, res) => {
     const session = await agent.sessions.get(req.params.id);

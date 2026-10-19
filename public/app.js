@@ -19,8 +19,14 @@ function syncProvider() {
   $('base-url').placeholder = h.base; $('base-url-hint').textContent = h.hint; $('model').placeholder = h.model;
 }
 const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', extension: 'Chrome 扩展', cdp: '连接 Chrome' };
+// Fetched only when the extension option is shown; it is not part of the streamed state.
+async function loadExtensionToken() {
+  if ($('extension-token').value) return;
+  try { $('extension-token').value = (await api('extension/token', {})).token; } catch (e) { toast(e.message); }
+}
 function syncBrowserMode() {
   const mode = $('browser-mode').value;
+  if (mode === 'extension') void loadExtensionToken();
   document.querySelectorAll('.browser-persistent').forEach(el => el.hidden = mode !== 'persistent');
   document.querySelectorAll('.browser-cdp').forEach(el => el.hidden = mode !== 'cdp');
   document.querySelectorAll('.browser-extension').forEach(el => el.hidden = mode !== 'extension');
@@ -100,7 +106,6 @@ function showFrame(data) {
 function render(state) {
   renderGrants(state.permissions || []);
   if (state.extension) {
-    if ($('extension-token').value !== state.extension.token) $('extension-token').value = state.extension.token;
     $('extension-dot').classList.toggle('offline', !state.extension.connected);
     $('extension-status').textContent = state.extension.connected ? `扩展已连接${state.extension.browser ? ` · ${(/Chrome\/[\d.]+/.exec(state.extension.browser) || [''])[0]}` : ''}` : '扩展未连接';
   }

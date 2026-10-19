@@ -559,6 +559,9 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   assert.equal(await page.locator('#blocked-sites').inputValue(), '');
   await page.selectOption('#browser-mode', 'cdp');
   assert.equal(await page.locator('#cdp-url').isVisible(), true); assert.equal(await page.locator('#login-open').isVisible(), false);
+  await page.selectOption('#browser-mode', 'extension');
+  await page.waitForFunction(() => document.getElementById('extension-token').value.length >= 20);
+  assert.equal(await page.locator('#extension-status').textContent(), '扩展未连接');
   await page.selectOption('#browser-mode', 'persistent');
   assert.equal(await page.locator('#login-open').isVisible(), true);
   await page.screenshot({ path: 'artifacts/browser-settings.png' });

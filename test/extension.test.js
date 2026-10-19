@@ -80,7 +80,10 @@ test('extension pairs with the relay only with the right token', { skip: !execut
   await until(() => relay.connected());
   const state = await (await fetch(`${origin}/api/state`)).json();
   assert.equal(state.extension.connected, true);
-  assert.equal(state.extension.token, relay.token);
+  assert.equal(state.extension.token, undefined, 'the token is not in the streamed state');
+  assert.equal((await post('extension/token', {})).body.token, relay.token);
+  assert.equal((await fetch(`${origin}/api/extension/token`)).status, 404, 'a plain GET (e.g. navigating to it) cannot read the token');
+  assert.equal((await fetch(`${origin}/api/extension/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 403, 'requests without the workbench header are refused');
   // A plain web page cannot open the extension channel.
   const refused = (url, options) => new Promise(done => { const ws = new WebSocket(url, options); ws.on('unexpected-response', (req, res) => done(res.statusCode)); ws.on('open', () => { ws.close(); done('open'); }); ws.on('error', () => {}); });
   assert.equal(await refused(`ws://127.0.0.1:${port}/relay/extension?token=${relay.token}`, { origin: 'https://evil.example' }), 403);

@@ -8,16 +8,19 @@ import { ConfigStore } from '../lib/config-store.js';
 
 test('model credentials survive restart, remain private, and clear persistently', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'obu-config-'));
-  const port = 14518, origin = `http://127.0.0.1:${port}`;
+  // Each restart listens on a new port: fetch keeps sockets to the old server pooled, and reusing one fails with ECONNRESET.
+  let port = 14517;
+  const origin = () => `http://127.0.0.1:${port}`;
   let server;
   const open = async () => {
+    port++;
     const { app } = createApp({ port, env: {}, dataDir: dir });
     server = await new Promise(resolve => { const s = app.listen(port, '127.0.0.1', () => resolve(s)); });
   };
-  const close = async () => { if (server) { await new Promise(resolve => server.close(resolve)); server = null; } };
-  const state = async () => (await (await fetch(`${origin}/api/state`)).json()).config;
+  const close = async () => { if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); server = null; } };
+  const state = async () => (await (await fetch(`${origin()}/api/state`)).json()).config;
   const save = async body => {
-    const response = await fetch(`${origin}/api/config`, {
+    const response = await fetch(`${origin()}/api/config`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Browser-Agent': '1' }, body: JSON.stringify(body),
     });
     assert.equal(response.status, 200);
