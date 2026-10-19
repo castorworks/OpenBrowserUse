@@ -80,7 +80,9 @@ function markdown(node, text) {
   node.innerHTML = DOMPurify.sanitize(marked.parse(text || ''), { FORBID_TAGS: ['img', 'style', 'input', 'form'], FORBID_ATTR: ['style'] });
 }
 // Chat transcript: user and agent messages as bubbles, each tool call as a collapsible card.
-function renderEvents(events) {
+function renderEvents(events, result = '') {
+  const lastFinal = events.findLastIndex(e => e.final && e.message === result);
+  events = events.filter((e, i) => i !== lastFinal);
   const key = JSON.stringify(events);
   if (key === lastEventKey) return;
   lastEventKey = key;
@@ -128,6 +130,7 @@ function showFrame(data) {
   $('screenshot').hidden = false; $('empty-state').hidden = true;
 }
 function render(state) {
+  const previousBusy = current?.busy;
   renderGrants(state.permissions || []);
   if (state.extension) {
     $('extension-dot').classList.toggle('offline', !state.extension.connected);
@@ -161,11 +164,11 @@ function render(state) {
   $('step-count').textContent = `动作 ${t.step} / ${t.maxSteps} · ${providerLabel[t.provider] || t.provider} · ${live ? '实时画面' : '截图随步骤更新'}`;
   $('page-url').textContent = t.snapshot?.url || '正在打开浏览器…';
   const screenshot = t.snapshot?.screenshot;
-  if (!live && screenshot !== lastImage) { if (screenshot) $('screenshot').src = screenshot; else $('screenshot').removeAttribute('src'); lastImage = screenshot; }
-  if (!live) { $('screenshot').hidden = !screenshot; $('empty-state').hidden = Boolean(screenshot); }
-  if (t.status !== lastStatus) { if (['done', 'failed', 'stopped'].includes(t.status)) void loadHistory(); lastStatus = t.status; }
+  if (!live && screenshot !== undefined && screenshot !== lastImage) { if (screenshot) $('screenshot').src = screenshot; else $('screenshot').removeAttribute('src'); lastImage = screenshot; }
+  if (!live) { const visible = Boolean(screenshot || lastImage === 'frame'); $('screenshot').hidden = !visible; $('empty-state').hidden = visible; }
+  if (t.status !== lastStatus || (previousBusy && !busy)) { if (['done', 'failed', 'stopped'].includes(t.status)) void loadHistory(); lastStatus = t.status; }
   if (showingTask) {
-    renderEvents(t.events);
+    renderEvents(t.events, t.result);
     $('result-box').hidden = !t.result; markdown($('result'), t.result);
   }
   // One chat box: steers a running task, continues an idle session.
@@ -188,7 +191,7 @@ function connect() {
   if (!window.EventSource) return poll();
   const source = new EventSource('/api/events');
   source.addEventListener('state', e => render(JSON.parse(e.data)));
-  source.addEventListener('frame', e => { if (current?.task?.sessionOpen) showFrame(e.data); });
+  source.addEventListener('frame', e => { if (current?.task) showFrame(e.data); });
   source.onerror = offline;
 }
 async function loadHistory() {
@@ -239,7 +242,7 @@ async function openReplay(id) {
   try {
     replay = await api(`sessions/${id}`);
     $('replay-banner').hidden = false; $('replay-title').textContent = `正在回放已保存的会话 · ${new Date(replay.events[0]?.time || Date.now()).toLocaleString('zh-CN', { hour12: false })}`;
-    lastEventKey = ''; renderEvents(replay.events);
+    lastEventKey = ''; renderEvents(replay.events, replay.result);
     $('result-box').hidden = !replay.result; markdown($('result'), replay.result);
     if (current) render(current);
     void loadHistory();
@@ -309,6 +312,6 @@ handle('send', async () => { await api('messages', { text: $('follow-up').value 
 document.querySelectorAll('[data-goal]').forEach(button => button.onclick = () => { $('goal').value = button.dataset.goal; $('start-url').value = button.dataset.url; $('goal').focus(); });
 // Enter sends from either composer; Shift+Enter adds a line.
 for (const [input, button] of [['goal', 'run'], ['follow-up', 'send']]) $(input).addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $(button).click(); } });
-$('export').onclick = () => { const t = replay || current?.task; if (!t) return; const data = { ...t, snapshot: t.snapshot ? { ...t.snapshot, screenshot: undefined } : null }; const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `open-browser-use-${t.id}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+$('export').onclick = async () => { try { const t = replay || (await api('state')).task; if (!t) return; const data = { ...t, snapshot: t.snapshot ? { ...t.snapshot, screenshot: undefined } : null }; const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `open-browser-use-${t.id}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); } catch (e) { toast(e.message); } };
 connect();
 void loadHistory();

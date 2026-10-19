@@ -55,21 +55,40 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
   });
   app.use(express.json({ limit: '64kb' }));
   const publicConfig = () => ({ ...config, apiKey: undefined, hasKey: Boolean(config.apiKey), envKey: config.provider === 'anthropic' && !config.apiKey && Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN), defaults: { baseURL: DEFAULT_BASE_URLS, model: DEFAULT_MODELS } });
-  const fullState = () => ({ config: publicConfig(), task: agent.state(), busy: agent.busy, loginOpen: Boolean(agent.login), permissions: agent.permissions.list(), extension: relay.status() });
+  const fullState = (compact = false) => ({ config: publicConfig(), task: agent.state({ compact }), busy: agent.busy, loginOpen: Boolean(agent.login), permissions: agent.permissions.list(), extension: relay.status() });
   app.get('/api/state', (req, res) => res.json(fullState()));
-  // Server-sent events: `state` whenever it changes (checked every 200 ms) and `frame` for the live view.
+  // Serialize once per change, shared by all subscribers. Frames never enter streamed state.
+  const subscribers = new Set();
+  let queued = false;
+  const publish = () => {
+    if (queued || !subscribers.size) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      const body = JSON.stringify(fullState(true));
+      for (const send of subscribers) send(body);
+    });
+  };
+  agent.on('change', publish); relay.on('change', publish);
+  app.use((req, res, next) => { if (req.method !== 'GET') res.on('finish', publish); next(); });
   app.get('/api/events', (req, res) => {
     res.set({ 'Content-Type': 'text/event-stream', 'X-Accel-Buffering': 'no' });
     res.flushHeaders();
-    const send = (event, data) => res.write(`event: ${event}\ndata: ${data}\n\n`);
+    const send = (event, data) => {
+      if (res.destroyed) return;
+      if (res.writableLength > 4 * 1024 * 1024) return res.destroy();
+      if (event === 'frame' && res.writableNeedDrain) return;
+      res.write(`event: ${event}\ndata: ${data}\n\n`);
+    };
     let last = '', frame = null, frameTimer = null;
-    const push = () => { const body = JSON.stringify(fullState()); if (body !== last) { last = body; send('state', body); } };
+    const push = body => { if (body !== last) { last = body; send('state', body); } };
     const onFrame = data => { frame = data; frameTimer ||= setTimeout(() => { frameTimer = null; send('frame', frame); }, 120); };
-    push();
-    const timer = setInterval(push, 200), ping = setInterval(() => res.write(': ping\n\n'), 15000);
+    subscribers.add(push); push(JSON.stringify(fullState(true)));
+    const ping = setInterval(() => res.write(': ping\n\n'), 15000);
     agent.frames.add(onFrame);
     if (agent.browser && agent.lastFrame) onFrame(agent.lastFrame);
-    req.on('close', () => { clearInterval(timer); clearInterval(ping); clearTimeout(frameTimer); agent.frames.delete(onFrame); });
+    else if (agent.task?.snapshot?.screenshot) onFrame(agent.task.snapshot.screenshot.split(',')[1]);
+    req.on('close', () => { subscribers.delete(push); clearInterval(ping); clearTimeout(frameTimer); agent.frames.delete(onFrame); });
   });
   // The pairing token is not part of the streamed state. POST means the header, JSON and origin
   // checks above apply, so opening this address in a browser (or the agent's browser) cannot read it.

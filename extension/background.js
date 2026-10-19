@@ -37,7 +37,7 @@ async function connect() {
   ws = socket;
   socket.onopen = () => {
     setStatus('connected');
-    send({ method: 'extension.hello', params: [{ userAgent: navigator.userAgent, product: `Chrome/${/Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] || ''}` }] });
+    send({ method: 'extension.hello', params: [{ protocolVersion: 1, capabilities: ['tabs.screenshot'], extensionVersion: chrome.runtime.getManifest().version, userAgent: navigator.userAgent, product: `Chrome/${/Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] || ''}` }] });
     clearInterval(pingTimer);
     // Regular traffic keeps the service worker alive while connected.
     pingTimer = setInterval(() => send({ method: 'ping' }), 20000);

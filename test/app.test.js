@@ -435,6 +435,11 @@ test('live updates: SSE pushes state changes and screencast frames; messages ste
   await until(() => agent.task?.status === 'running' && agent.browser);
   assert.equal((await post('messages', { text: '顺便看看价格' })).status, 202);
   const events = await streamed;
+  for (const event of events.filter(e => e.type === 'state')) {
+    const task = JSON.parse(event.data).task;
+    assert.equal(task?.snapshot?.screenshot, undefined, 'frames are not duplicated in streamed state');
+    assert.equal(task?.history, undefined, 'full tool history is fetched only for export');
+  }
   const frame = events.find(e => e.type === 'frame').data;
   assert.ok(Buffer.from(frame, 'base64').subarray(0, 2).equals(Buffer.from([0xff, 0xd8])), 'frame is a JPEG');
   await until(() => agent.task.status === 'approval');
@@ -573,6 +578,9 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   assert.equal(await page.locator('#screenshot').isVisible(), true);
   await page.waitForFunction(() => !document.getElementById('run').disabled);
   await page.screenshot({ path: 'artifacts/demo-complete.png', fullPage: true });
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('result').textContent.includes('演示完成'));
+  await page.locator('#screenshot').waitFor({ state: 'visible' });
   await page.locator('#settings-shortcut').click();
   assert.equal(await page.locator('#drawer').isVisible(), true);
   await page.selectOption('#provider', 'deepseek');
