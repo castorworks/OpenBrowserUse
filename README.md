@@ -1,4 +1,4 @@
-# My Browser Use
+# Open Browser Use
 
 一个本地运行的 AI 浏览器代理。输入自然语言目标，模型像 Claude in Chrome 一样通过工具调用读取页面、点击、输入、切换标签页，界面显示截图、每一步工具调用和结果；完成后可以在同一个浏览器里继续对话。默认使用 Anthropic Claude（`claude-opus-5-5`），也支持 DeepSeek 和兼容 OpenAI 的 Chat Completions 服务（需支持 function calling）。
 

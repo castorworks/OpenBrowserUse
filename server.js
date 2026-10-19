@@ -128,7 +128,7 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 4318);
   const { app, agent } = createApp({ port });
-  const server = app.listen(port, '127.0.0.1', () => console.log(`Browser Use ready: http://127.0.0.1:${port}`));
+  const server = app.listen(port, '127.0.0.1', () => console.log(`Open Browser Use ready: http://127.0.0.1:${port}`));
   server.on('error', error => { console.error(error.message); process.exitCode = 1; });
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { try { agent.control('stop'); } catch {} await agent.promise; await agent.closeBrowser(); await agent.closeLogin(); agent.sessions.close(); server.close(); });
 }
