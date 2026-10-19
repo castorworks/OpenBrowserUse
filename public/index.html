@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Browser Use · 你的浏览器助手</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body>
-  <aside class="rail"><a class="brand" href="/" aria-label="Browser Use 首页">b<span>↗</span></a><div class="rail-line"></div><span class="rail-icon active" title="任务工作台">▦</span><button class="rail-icon" id="settings-shortcut" title="模型设置" aria-label="模型设置">⚙</button><span class="rail-bottom">LOCAL<br>V0.1</span></aside>
+  <aside class="rail"><a class="brand" href="/" aria-label="Browser Use 首页">b<span>↗</span></a><div class="rail-line"></div><span class="rail-icon active" title="任务工作台">▦</span><button class="rail-icon" id="settings-shortcut" title="模型设置" aria-label="模型设置">⚙</button><span class="rail-bottom">LOCAL<br>V0.2</span></aside>
   <main>
     <header><div class="wordmark">browser<span>use</span><span class="tag">个人工作台</span></div><div class="connection"><span class="dot" id="connection-dot"></span><span id="connection">连接中</span></div></header>
     <section class="intro"><p class="eyebrow">YOUR INTENT. BROWSER ACTIONS.</p><h1>把目标交给浏览器。</h1><p>描述你想完成的事，观察每一步，随时接管。</p></section>
@@ -12,17 +12,19 @@
           <label for="goal">你希望完成什么？</label><textarea id="goal" rows="4" placeholder="例如：打开 Playwright 官网，找到浏览器支持列表，并用中文整理结果。"></textarea>
           <div class="examples"><button data-goal="阅读这个网页，总结它的主要内容，并附上来源链接。" data-url="https://example.com">↗ 网页总结</button><button data-goal="访问 Playwright 官网，查找支持哪些浏览器，并用中文总结，附上来源。" data-url="https://playwright.dev">⌕ 文档检索</button></div>
           <label for="start-url">起始网页</label><input id="start-url" type="url" value="https://example.com" placeholder="https://…">
-          <div class="task-options"><label class="check"><input id="auto-interact" type="checkbox">自动执行页面交互</label><label class="steps-label" for="max-steps">最多 <input id="max-steps" type="number" min="1" max="80" value="20"> 步</label></div>
+          <div class="task-options"><label class="check"><input id="auto-interact" type="checkbox">自动执行页面交互</label><label class="steps-label" for="max-steps">最多 <input id="max-steps" type="number" min="1" max="200" value="50"> 步</label></div>
           <p class="hint">默认在点击、输入等交互前确认。开启自动执行适用于你信任的站点。</p>
           <button class="primary" id="run">开始执行 <span>↗</span></button><button class="demo-button" id="demo">先体验本地演示 <span>无需 API Key · 固定脚本</span></button>
         </section>
         <details class="card settings" id="settings"><summary><span>模型设置</span><span id="model-badge">待配置</span></summary><div class="settings-content">
-          <label for="base-url">Base URL（含 /v1，不含 /chat/completions）</label><input id="base-url" type="url" placeholder="https://api.openai.com/v1">
-          <label for="model">模型名</label><input id="model" placeholder="服务商提供的模型 ID" autocomplete="off">
+          <label for="provider">服务类型</label><select id="provider"><option value="anthropic">Anthropic Claude（推荐）</option><option value="openai">OpenAI 兼容服务</option></select>
+          <label for="base-url">Base URL <span id="base-url-hint"></span></label><input id="base-url" type="url" placeholder="留空使用 Anthropic 官方地址">
+          <label for="model">模型名</label><input id="model" placeholder="例如 claude-opus-5-5" autocomplete="off">
           <label for="api-key">API Key <span id="key-status"></span></label><input id="api-key" type="password" placeholder="仅保存在本地服务内存" autocomplete="off">
           <label class="check"><input id="clear-key" type="checkbox">清除已保存的 Key</label>
-          <label class="check"><input id="vision" type="checkbox">附带截图（需模型支持视觉）</label><label class="check"><input id="json-mode" type="checkbox">启用 JSON 模式（需服务商支持）</label>
-          <p class="hint">任务、网页文字会发送给所选模型服务；勾选视觉后也会发送截图。Key 不写入磁盘。切换 Base URL 时请重新填写 Key。</p><button class="secondary" id="save-config">保存配置</button>
+          <div class="provider-anthropic"><label for="effort">思考强度（effort）</label><select id="effort"><option value="low">low</option><option value="medium">medium</option><option value="high" selected>high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div>
+          <label class="check provider-openai"><input id="vision" type="checkbox">发送截图（需模型支持视觉）</label>
+          <p class="hint">任务、网页文字和截图会发送给所选模型服务。Key 不写入磁盘；切换服务类型或 Base URL 时需重新填写。Anthropic 留空 Key 时使用 ANTHROPIC_API_KEY 或 ant auth login 的凭据。</p><button class="secondary" id="save-config">保存配置</button>
         </div></details>
       </div>
       <div class="right-column">
@@ -31,7 +33,7 @@
           <div class="viewer-footer"><span id="step-count">等待观察页面</span><div class="controls"><button id="pause" disabled>暂停 / 接管</button><button id="resume" hidden>继续执行</button><button id="stop" disabled>停止</button></div></div>
         </section>
         <section class="card decision" id="decision" hidden><h2 id="decision-title">确认下一步</h2><pre id="decision-detail"></pre><textarea id="user-answer" placeholder="补充要求，或说明已在浏览器中完成的操作" rows="2" hidden></textarea><div class="decision-buttons"><button class="primary" id="approve">允许这一步</button><button class="secondary" id="reject">拒绝</button><button class="primary" id="answer" hidden>发送并继续</button></div></section>
-        <section class="card activity"><div class="section-head"><h2>执行记录</h2><button class="text-button" id="export" disabled>导出记录 ↓</button></div><div id="events" aria-live="polite"><p class="empty-log">每一步动作和执行结果会显示在这里。</p></div><div id="result-box" hidden><span class="eyebrow">RESULT</span><pre id="result"></pre></div></section>
+        <section class="card activity"><div class="section-head"><h2>执行记录</h2><button class="text-button" id="export" disabled>导出记录 ↓</button></div><div id="events" aria-live="polite"><p class="empty-log">每一步动作和执行结果会显示在这里。</p></div><div id="result-box" hidden><span class="eyebrow">RESULT</span><pre id="result"></pre></div><div id="follow-up-box" hidden><label for="follow-up">继续对话</label><textarea id="follow-up" rows="2" placeholder="在同一个浏览器里继续，例如：再打开第一个结果并总结"></textarea><div class="decision-buttons"><button class="primary" id="send">发送</button><button class="secondary" id="close-session">关闭浏览器</button></div></div></section>
       </div>
     </div>
     <footer>由你设定目标，由你掌握控制权。<span>本地运行 · 独立会话 · 可随时停止</span></footer>

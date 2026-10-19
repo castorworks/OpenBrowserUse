@@ -1,77 +1,84 @@
 # My Browser Use
 
-一个本地运行的 AI 浏览器自动化原型。输入自然语言目标，模型根据网页观察选择动作，Playwright 操作独立的 Edge 会话，界面显示截图、步骤和结果。支持兼容 OpenAI 的 Chat Completions 服务。
+一个本地运行的 AI 浏览器代理。输入自然语言目标，模型像 Claude in Chrome 一样通过工具调用读取页面、点击、输入、切换标签页，界面显示截图、每一步工具调用和结果；完成后可以在同一个浏览器里继续对话。默认使用 Anthropic Claude（`claude-opus-5-5`），也支持兼容 OpenAI 的 Chat Completions 服务（需支持 function calling）。
 
 ## 开始使用
 
-需要 Node.js 22+ 和 Microsoft Edge。本项目已在当前 Windows 机器安装依赖。
+需要 Node.js 22+ 和 Chrome / Edge（都没有时运行 `npx playwright install chromium`）。
 
-```powershell
-cd C:\Users\ricl\Downloads\my-browser-use
+```bash
 npm install
 npm start
 ```
 
-打开 http://127.0.0.1:4318 。点击“先体验本地演示”可以无需 Key 验证真实浏览器的输入、点击、观察和结果展示。**演示使用固定脚本，不代表模型智能或真实 AI 测试。**
+打开 http://127.0.0.1:4318 。点击“先体验本地演示”可以无需 Key 验证真实浏览器和工具循环。**演示使用固定脚本，不代表模型智能。**
 
-在“模型设置”里填写：
+在“模型设置”里选择服务类型：
 
-- Base URL：服务商的 API 根地址，如 `https://api.openai.com/v1`，不要附加 `/chat/completions`。
-- 模型名：服务商提供的完整模型 ID。
-- API Key：该服务商的 Key。允许留空，以支持无需 Key 的本地兼容服务。
-- JSON 模式、截图视觉：默认关闭；仅当服务商和模型支持时启用。
+- **Anthropic Claude**：模型默认 `claude-opus-5-5`，Base URL 留空即官方地址。Key 可在界面填写；留空时使用 `ANTHROPIC_API_KEY` 或 `ant auth login` 的凭据。“思考强度”对应 `output_config.effort`，默认 high。
+- **OpenAI 兼容服务**：Base URL 如 `https://api.openai.com/v1`（不要附加 `/chat/completions`），填写模型 ID 和 Key。模型必须支持 tools / function calling。“发送截图”仅在模型支持视觉时开启。
 
-保存配置，输入目标和起始网页，点击“开始执行”。程序会打开一个单独的浏览器窗口。默认每次点击、输入、选项选择和按键都需要在工作台确认；可信站点可启用“自动执行页面交互”。内置演示在本地示例页面自动执行。
+保存配置，输入目标和起始网页，点击“开始执行”。默认每次点击、输入、按键、表单填写都需要在工作台确认；可信站点可启用“自动执行页面交互”。`javascript` 工具无论如何都需要确认。
 
-“暂停 / 接管”会取消当前模型请求，在当前浏览器操作结束后暂停。可以直接操作浏览器窗口，随后点击“继续执行”，系统会重新读取页面。遇到登录、验证码或需要补充信息时，模型可请求人工接管。停止会取消请求并关闭会话，已经完成的网页操作无法撤销。
-
-任务完成后关闭浏览器，只保留当前任务的内存记录和最后截图。可以“导出记录”保存 JSON；导出内容包含任务、网页文字和输入值，不包含配置 Key 和截图。服务重启后配置和记录清空。
+“暂停 / 接管”会取消当前模型请求，在当前浏览器操作结束后暂停。可以直接操作浏览器窗口，然后点击“继续执行”。模型会在登录、验证码、密码或需要补充信息时用 `ask_user` 请求人工接管。模型回答后浏览器保持打开，可在“继续对话”中追问，或点击“关闭浏览器”结束会话。
 
 ## 环境配置
 
-也可在启动前通过环境变量配置。不要把真实 Key 写入仓库或分享的启动脚本。
-
-```powershell
-$env:MODEL_BASE_URL = 'https://your-provider.example/v1'
-$env:MODEL_NAME = 'your-model-id'
-# MODEL_API_KEY 可通过本机环境变量注入，也可在界面中填写。
+```bash
+export MODEL_PROVIDER=anthropic        # 或 openai
+export MODEL_NAME=claude-opus-5-5
+export ANTHROPIC_API_KEY=...           # Anthropic；OpenAI 兼容服务用 MODEL_API_KEY / MODEL_BASE_URL
 npm start
 ```
 
-默认用 Edge。如果其他系统没有 Edge，可运行 `npx playwright install chromium`，然后设置 `BROWSER_CHANNEL=chromium`。也支持 `BROWSER_CHANNEL=chrome`。端口由 `PORT` 配置，默认 4318，仅绑定 `127.0.0.1`。
+浏览器按 Chrome → Edge → Playwright Chromium 的顺序自动选择，可用 `BROWSER_CHANNEL=chrome|msedge|chromium` 指定。端口由 `PORT` 配置，默认 4318，仅绑定 `127.0.0.1`。不要把真实 Key 写入仓库。
 
 ## 实现结构
 
 ```text
-server.js          本地 HTTP API、配置、请求来源检查
-lib/model.js       模型请求、动作 schema 校验、提示词
-lib/browser.js     浏览器生命周期、页面观察、元素操作
-lib/runner.js      任务循环、确认、暂停、恢复、错误恢复
-public/            中文工作台和本地演示商店
-test/app.test.js   真实 Edge + 模拟模型 API 的集成测试
+server.js                本地 HTTP API、配置、请求来源检查
+lib/agent.js             工具调用循环、确认、暂停/恢复、追问、停止
+lib/prompt.js            系统提示词（固定内容，便于缓存）
+lib/providers/           anthropic.js（SDK 流式、自适应思考、拒绝回退）、openai.js、demo.js
+lib/tools/               read_page / find / get_page_text、computer、navigate / tabs / form_input、控制台/网络/javascript
+lib/browser/             会话、跨 iframe 和 Shadow DOM 的元素引用、URL 限制、浏览器选择
+public/                  中文工作台和本地演示商店
+test/app.test.js         真实浏览器 + 模拟 OpenAI / Anthropic 接口的集成测试
 ```
 
-循环：观察页面 → 将目标、网页、最近动作发给模型 → 校验 JSON 动作 → 必要时等待用户确认 → 执行动作 → 重新观察。模型输出不能执行任意 JavaScript、系统命令或自行添加工具。
+循环：模型收到目标 → 调用工具（可一次多个）→ 结果（文本或截图）返回模型 → 直到模型不再调用工具，给出答案。对话历史只追加不改写，配合提示缓存和 Claude 的思考块保留规则。
 
-每次观察读取最多 100 个可见交互元素、16,000 字符正文；记录最近 14 项动作给模型。截图仅在开启视觉时发送。当前执行器支持导航、点击、填表、选择、有限按键、滚动、后退、切换标签、等待和结束。元素引用基于实际 DOM 句柄；失效时重新观察。连续 3 次错误或达到步数上限会停止。
+工具：
+
+| 工具 | 作用 |
+|---|---|
+| `read_page` | 可访问性树，每个可交互元素有稳定的 `ref_N`，覆盖 iframe 和开放 Shadow DOM |
+| `find` | 按描述查找元素，返回 ref |
+| `get_page_text` | 读取正文文字 |
+| `computer` | 截图、坐标或 ref 点击（左/右/双击/三击）、输入、组合键、滚动、拖拽、悬停、局部放大、等待 |
+| `form_input` | 按 ref 设置输入框、下拉框、复选框 |
+| `navigate` / `tabs` | 打开网址、前进后退；列出、新建、切换、关闭标签页 |
+| `read_console_messages` / `read_network_requests` | 控制台输出和网络请求 |
+| `javascript` | 在页面执行脚本（始终需要确认） |
+| `ask_user` | 请用户回答或接管 |
+
+Anthropic 请求使用 `messages.stream`，开启自适应思考；支持的模型会把工具调用之间的进度说明显示在执行记录中。直连官方 API 时开启服务端拒绝回退（`fallbacks: "default"`）；自定义 Base URL 时不发送。OpenAI 兼容服务只保留最近 2 张截图。
 
 ## 验证
 
-```powershell
+```bash
 npm test
 ```
 
-测试使用真实无头 Edge 和本机模拟模型服务，不消耗模型额度。覆盖动作约束、来源检查、Key 不回传、切换服务时清除旧 Key、逐步确认、重复任务拦截、暂停恢复、人工补充、拒绝、停止、错误上限、演示和移动端布局。截图输出在 `artifacts/`。
+测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON 和 Anthropic SSE 流），不消耗模型额度。覆盖工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框拦截、来源检查、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、演示和移动端布局。截图输出在 `artifacts/`。
 
-尚未使用用户的真实模型 Key 做端到端验证；不同兼容服务可能需要调整 JSON 或视觉选项。HTTP 401/403 通常需检查认证和权限，404 需检查 Base URL 与模型 ID，400 需检查服务商支持的请求参数。
+尚未用真实 Anthropic / OpenAI Key 做端到端验证。
 
 ## 当前边界
 
-- 原型针对普通 DOM 网页。跨域 iframe、封闭 Shadow DOM、纯 Canvas、拖拽、下载、上传和浏览器扩展尚未支持。复杂站点可能需要人工操作。
-- 每个任务新建独立会话，不复用个人浏览器的 Cookie，不持久化登录。网页对话框自动关闭，下载不被接受。
-- 模型可见任务、网页文字和动作历史；视觉模式还可见页面截图。请按所选服务商的数据处理方式选择浏览内容。
-- 默认交互确认可以控制逐步执行，但自动模式依赖模型判断，不能保证识别全部敏感操作。导航本身也可能引发站点行为。
-- 限制 HTTP(S)、拦截常见私网字面地址、阻止受控浏览器访问控制台 API，并验证控制台请求来源。这不是针对恶意网站的完整网络沙箱；DNS 指向私网、复杂重绑定和全部 IPv6 形式不在现有防护保证内。不要对公网暴露此服务。
-- 当前为单任务、内存状态；没有账号体系、长期任务库或生产部署配置。页面确认期间，浏览器仍是动态网页；目标校验能发现部分变化，不能消除全部页面竞态。
-
-接口与库参考：[Playwright Page](https://playwright.dev/docs/api/class-page)、[Chat Completions API](https://developers.openai.com/api/reference/resources/chat)。
+- 每个任务新建独立浏览器会话，不复用个人浏览器的 Cookie，不持久化登录（计划中的下一阶段）。网页对话框自动关闭，下载不被接受，文件上传和密码输入交给人工。
+- 封闭 Shadow DOM 和纯 Canvas 页面没有 ref，需要截图 + 坐标操作。
+- 模型可见任务、网页文字、截图和工具结果。请按所选服务商的数据处理方式选择浏览内容。
+- 默认交互确认可以控制逐步执行；自动模式依赖模型判断，不能保证识别全部敏感操作。导航本身也可能引发站点行为。
+- 限制 HTTP(S)、拦截常见私网字面地址、阻止受控浏览器访问控制台 API，并验证控制台请求来源。这不是针对恶意网站的完整网络沙箱。不要对公网暴露此服务。
+- 单任务、内存状态；没有账号体系、长期任务库或生产部署配置。工作台每秒轮询状态，尚未流式推送。
