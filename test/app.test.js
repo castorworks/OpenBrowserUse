@@ -510,7 +510,8 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   assert.equal(await page.locator('#screenshot').isVisible(), true);
   await page.waitForFunction(() => !document.getElementById('run').disabled);
   await page.screenshot({ path: 'artifacts/demo-complete.png', fullPage: true });
-  await page.locator('#settings').evaluate(el => { el.open = true; });
+  await page.locator('#settings-shortcut').click();
+  assert.equal(await page.locator('#drawer').isVisible(), true);
   await page.selectOption('#provider', 'deepseek');
   assert.equal(await page.locator('#base-url').inputValue(), 'https://api.deepseek.com');
   assert.equal(await page.locator('#model').inputValue(), 'deepseek-flash');
@@ -521,13 +522,21 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   assert.ok(await page.locator('.bubble.user').count() >= 1);
   await page.selectOption('#permission-mode', 'auto');
   assert.match(await page.locator('#mode-hint').textContent(), /审查/);
-  await page.locator('#browser-settings').evaluate(el => { el.open = true; });
+  await page.locator('[data-tab="browser-settings"]').click();
   assert.match(await page.locator('#blocked-sites').inputValue(), /paypal\.com/);
   await page.selectOption('#browser-mode', 'cdp');
   assert.equal(await page.locator('#cdp-url').isVisible(), true); assert.equal(await page.locator('#login-open').isVisible(), false);
   await page.selectOption('#browser-mode', 'persistent');
   assert.equal(await page.locator('#login-open').isVisible(), true);
-  await page.screenshot({ path: 'artifacts/browser-settings.png', fullPage: true });
+  await page.screenshot({ path: 'artifacts/browser-settings.png' });
+  await page.locator('[data-tab="permissions-panel"]').click();
+  assert.equal(await page.locator('#blocked-sites').isVisible(), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#drawer').isVisible(), false);
+  // New task returns to the start screen without touching the finished session.
+  await page.locator('#new-task').click();
+  assert.equal(await page.locator('#welcome').isVisible(), true);
+  assert.equal(await page.locator('#task-composer').isVisible(), true);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), await page.evaluate(() => [...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right > innerWidth + 1).slice(0, 6).map(e => `${e.tagName}.${e.className}#${e.id} ${Math.round(e.getBoundingClientRect().right)}`).join(' | ')));
   await page.screenshot({ path: 'artifacts/mobile.png', fullPage: true });

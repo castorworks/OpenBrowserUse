@@ -1,58 +1,160 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Open Browser Use · 你的浏览器助手</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Open Browser Use · 你的浏览器助手</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
 <body>
-  <aside class="rail"><a class="brand" href="/" aria-label="Open Browser Use 首页">o<span>↗</span></a><div class="rail-line"></div><span class="rail-icon active" title="任务工作台">▦</span><button class="rail-icon" id="settings-shortcut" title="模型设置" aria-label="模型设置">⚙</button><span class="rail-bottom">LOCAL<br>V0.2</span></aside>
-  <main>
-    <header><div class="wordmark">openbrowser<span>use</span><span class="tag">个人工作台</span></div><div class="connection"><span class="dot" id="connection-dot"></span><span id="connection">连接中</span></div></header>
-    <section class="intro"><p class="eyebrow">YOUR INTENT. BROWSER ACTIONS.</p><h1>把目标交给浏览器。</h1><p>描述你想完成的事，观察每一步，随时接管。</p></section>
-    <div class="workspace">
-      <div class="left-column">
-        <section class="card composer"><div class="section-head"><h2>新任务</h2><span class="mini-label">01 / INSTRUCT</span></div>
-          <label for="goal">你希望完成什么？</label><textarea id="goal" rows="4" placeholder="例如：打开 Playwright 官网，找到浏览器支持列表，并用中文整理结果。"></textarea>
-          <div class="examples"><button data-goal="阅读这个网页，总结它的主要内容，并附上来源链接。" data-url="https://example.com">↗ 网页总结</button><button data-goal="访问 Playwright 官网，查找支持哪些浏览器，并用中文总结，附上来源。" data-url="https://playwright.dev">⌕ 文档检索</button></div>
-          <label for="start-url">起始网页</label><input id="start-url" type="url" value="https://example.com" placeholder="https://…">
-          <div class="task-options"><label class="mode-label" for="permission-mode">权限 <select id="permission-mode"><option value="ask">逐步确认</option><option value="auto">自动 · 审查风险</option><option value="skip">跳过确认</option></select></label><label class="steps-label" for="max-steps">最多 <input id="max-steps" type="number" min="1" max="200" value="50"> 步</label></div>
-          <p class="hint" id="mode-hint">每次点击、输入前都请你确认；首次访问新网站时也会询问。</p>
-          <button class="primary" id="run">开始执行 <span>↗</span></button><button class="demo-button" id="demo">先体验本地演示 <span>无需 API Key · 固定脚本</span></button>
-        </section>
-        <details class="card settings" id="settings"><summary><span>模型设置</span><span id="model-badge">待配置</span></summary><div class="settings-content">
-          <label for="provider">服务类型</label><select id="provider"><option value="anthropic">Anthropic Claude（推荐）</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI 兼容服务</option></select>
-          <label for="base-url">Base URL <span id="base-url-hint"></span></label><input id="base-url" type="url" placeholder="留空使用 Anthropic 官方地址">
-          <label for="model">模型名</label><input id="model" placeholder="例如 claude-opus-5-5" autocomplete="off">
-          <label for="api-key">API Key <span id="key-status"></span></label><input id="api-key" type="password" placeholder="仅保存在本地服务内存" autocomplete="off">
-          <label class="check"><input id="clear-key" type="checkbox">清除已保存的 Key</label>
-          <label for="reviewer-model">审查模型（自动模式，可选）</label><input id="reviewer-model" placeholder="留空：Claude 用 claude-haiku-5-5，其他服务用主模型" autocomplete="off">
-          <div class="provider-effort"><label for="effort">思考强度（effort）</label><select id="effort"><option value="low">low</option><option value="medium">medium</option><option value="high" selected>high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div>
-          <label class="check provider-openai"><input id="vision" type="checkbox">发送截图（需模型支持视觉）</label>
-          <p class="hint">任务、网页文字和截图会发送给所选模型服务。Key 不写入磁盘；切换服务类型或 Base URL 时需重新填写。Anthropic 留空 Key 时使用 ANTHROPIC_API_KEY 或 ant auth login 的凭据。</p><button class="secondary" id="save-config">保存配置</button>
-        </div></details>
-        <details class="card settings" id="browser-settings"><summary><span>浏览器设置</span><span id="browser-badge">独立会话</span></summary><div class="settings-content">
-          <label for="browser-mode">浏览器</label><select id="browser-mode"><option value="ephemeral">独立会话（每次全新，不保留登录）</option><option value="persistent">使用持久化浏览器配置（保留登录）</option><option value="cdp">连接我正在运行的 Chrome（CDP）</option></select>
-          <div class="browser-persistent"><p class="hint">专用配置保存在本机，与个人 Chrome 分开。先打开登录浏览器手动登录需要的网站，关闭后再执行任务。</p><div class="decision-buttons"><button class="secondary" id="login-open">打开登录浏览器</button><button class="secondary" id="login-close" hidden>关闭登录浏览器</button></div></div>
-          <div class="browser-cdp"><label for="cdp-url">CDP 地址</label><input id="cdp-url" type="url" placeholder="http://127.0.0.1:9222"><p class="hint">用 --remote-debugging-port=9222 启动 Chrome。代理只使用并关闭它自己打开的标签页，不会关闭你的浏览器。</p></div>
-          <label class="check"><input id="allow-localhost" type="checkbox">允许访问 localhost（本机开发服务器）</label>
-          <label class="check"><input id="allow-private" type="checkbox">允许访问内网地址（192.168.x.x 等）</label>
-          <p class="hint">工作台自身的地址始终禁止访问。</p>
-          <label for="blocked-sites">受保护网站（只读，不能操作；每行一个域名）</label><textarea id="blocked-sites" rows="4"></textarea>
-          <button class="secondary" id="save-browser">保存浏览器设置</button>
-          <label>网站权限</label><div id="site-grants"><p class="hint">还没有保存的网站权限。</p></div>
-        </div></details>
-        <details class="card settings" id="history"><summary><span>历史会话</span><span id="history-count"></span></summary><div class="settings-content"><div id="history-list"><p class="hint">还没有保存的会话。</p></div></div></details>
+<div class="app">
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="icon-btn only-narrow" id="sidebar-toggle" aria-label="历史会话" title="历史会话"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg></button>
+      <a class="brand" href="/" aria-label="Open Browser Use 首页">
+        <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/><path d="M10 15l4-4m0 0h-3m3 0v3"/></svg></span>
+        <span class="brand-name">Open Browser Use</span>
+      </a>
+      <span class="brand-tag">本地</span>
+    </div>
+    <div class="topbar-right">
+      <span class="conn"><span class="dot" id="connection-dot"></span><span id="connection">连接中</span></span>
+      <button class="chip" id="model-chip" title="模型设置"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3"/></svg><span id="model-badge">待配置</span></button>
+      <button class="icon-btn" id="settings-shortcut" aria-label="设置" title="设置"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.6 2.5h2.8l.4 2.1 1.6.9 2-.8 1.4 2.4-1.6 1.4v1.8l1.6 1.4-1.4 2.4-2-.8-1.6.9-.4 2.1H8.6l-.4-2.1-1.6-.9-2 .8-1.4-2.4 1.6-1.4V9.1L3.2 7.7l1.4-2.4 2 .8 1.6-.9z"/><circle cx="10" cy="10" r="2.4"/></svg></button>
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <button class="btn btn-primary btn-block" id="new-task"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>新任务</button>
+    <div class="sidebar-label"><span>历史会话</span><span id="history-count"></span></div>
+    <div id="history-list" class="history-list"><p class="muted small">还没有保存的会话。</p></div>
+    <div class="sidebar-foot">v0.2 · 数据只保存在本机</div>
+  </aside>
+
+  <main class="chat">
+    <div class="pane-head">
+      <h1 id="chat-title">新任务</h1>
+      <button class="btn btn-ghost btn-sm" id="export" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12"/></svg>导出</button>
+    </div>
+    <div class="chat-scroll" id="chat-scroll">
+      <div id="replay-banner" class="banner" hidden><span id="replay-title"></span><button class="btn btn-ghost btn-sm" id="replay-exit">返回当前任务</button></div>
+      <section class="welcome" id="welcome">
+        <h2>把目标交给浏览器</h2>
+        <p>描述你想完成的事。代理会读取页面、点击和输入，每一步都显示在这里，你可以随时确认、补充或接管。</p>
+        <div class="examples">
+          <button class="example" data-goal="阅读这个网页，总结它的主要内容，并附上来源链接。" data-url="https://example.com"><strong>网页总结</strong><span>阅读页面并整理要点</span></button>
+          <button class="example" data-goal="访问 Playwright 官网，查找支持哪些浏览器，并用中文总结，附上来源。" data-url="https://playwright.dev"><strong>文档检索</strong><span>在文档站查找并汇总信息</span></button>
+          <button class="example demo" id="demo"><strong>本地演示</strong><span>无需 API Key · 固定脚本</span></button>
+        </div>
+      </section>
+      <div id="events" class="events" aria-live="polite"></div>
+      <div id="result-box" class="answer" hidden><div class="answer-label">结果</div><pre id="result"></pre></div>
+    </div>
+
+    <section class="decision" id="decision" hidden>
+      <div class="decision-head"><span class="decision-icon" aria-hidden="true">!</span><h2 id="decision-title">确认下一步</h2></div>
+      <pre id="decision-detail"></pre>
+      <textarea id="user-answer" placeholder="补充要求，或说明已在浏览器中完成的操作" rows="2" hidden></textarea>
+      <div class="button-row">
+        <button class="btn btn-primary" id="approve">允许这一步</button>
+        <button class="btn" id="approve-site" hidden>始终允许此网站</button>
+        <button class="btn" id="reject">拒绝</button>
+        <button class="btn btn-danger-ghost" id="deny-site" hidden>禁止此网站</button>
+        <button class="btn btn-primary" id="answer" hidden>发送并继续</button>
       </div>
-      <div class="right-column">
-        <section class="card viewer"><div class="section-head"><h2><span class="live-dot"></span>浏览器视图</h2><span id="status" class="status">就绪</span></div><div class="address-bar"><span class="traffic"><i></i><i></i><i></i></span><span id="page-url">等待新任务</span><span>↗</span></div>
-          <div class="viewport" id="viewport"><div class="empty-state" id="empty-state"><div class="browser-symbol"><span></span><span></span><span></span><b>↗</b></div><h3>下一次探索，从这里开始</h3><p>创建任务，或先运行无需配置的演示。<br>执行时会打开独立的浏览器窗口。</p></div><img id="screenshot" alt="受控浏览器最近一次页面截图" hidden></div>
-          <div class="viewer-footer"><span id="step-count">等待观察页面</span><div class="controls"><button id="pause" disabled>暂停 / 接管</button><button id="resume" hidden>继续执行</button><button id="stop" disabled>停止</button></div></div>
-        </section>
-        <section class="card decision" id="decision" hidden><h2 id="decision-title">确认下一步</h2><pre id="decision-detail"></pre><textarea id="user-answer" placeholder="补充要求，或说明已在浏览器中完成的操作" rows="2" hidden></textarea><div class="decision-buttons"><button class="primary" id="approve">允许这一步</button><button class="secondary" id="approve-site" hidden>始终允许此网站</button><button class="secondary" id="reject">拒绝</button><button class="secondary" id="deny-site" hidden>禁止此网站</button><button class="primary" id="answer" hidden>发送并继续</button></div></section>
-        <section class="card activity"><div class="section-head"><h2>对话</h2><button class="text-button" id="export" disabled>导出记录 ↓</button></div>
-          <div id="replay-banner" hidden><span id="replay-title"></span><button class="text-button" id="replay-exit">返回当前任务</button></div>
-          <div id="events" aria-live="polite"><p class="empty-log">你的目标、代理的说明和每次工具调用会显示在这里。</p></div>
-          <div id="result-box" hidden><span class="eyebrow">RESULT</span><pre id="result"></pre></div>
-          <div id="follow-up-box" hidden><label for="follow-up" id="chat-label">继续对话</label><textarea id="follow-up" rows="2" placeholder="在同一个浏览器里继续，例如：再打开第一个结果并总结"></textarea><div class="decision-buttons"><button class="primary" id="send">发送</button><button class="secondary" id="close-session">关闭浏览器</button></div></div></section>
+    </section>
+
+    <div class="composer" id="task-composer">
+      <label class="sr-only" for="goal">你希望完成什么？</label>
+      <textarea id="goal" rows="2" placeholder="描述目标，例如：打开 Playwright 官网，找到浏览器支持列表，并用中文整理结果。"></textarea>
+      <div class="composer-row">
+        <label class="field-inline url-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c2.5 2.2 2.5 11.8 0 14M10 3c-2.5 2.2-2.5 11.8 0 14"/></svg><span class="sr-only">起始网页</span><input id="start-url" type="url" value="https://example.com" placeholder="起始网页 https://…"></label>
+        <label class="field-inline" title="权限模式"><span class="sr-only">权限</span><select id="permission-mode"><option value="ask">逐步确认</option><option value="auto">自动 · 审查风险</option><option value="skip">跳过确认</option></select></label>
+        <label class="field-inline steps" title="最多步数">最多<input id="max-steps" type="number" min="1" max="200" value="50">步</label>
+        <button class="btn btn-primary" id="run">开始执行<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10h10m0 0l-4-4m4 4l-4 4"/></svg></button>
+      </div>
+      <p class="hint" id="mode-hint">每次点击、输入前都请你确认；首次访问新网站时也会询问。</p>
+    </div>
+
+    <div class="composer" id="follow-up-box" hidden>
+      <label class="composer-label" for="follow-up" id="chat-label">继续对话</label>
+      <textarea id="follow-up" rows="2" placeholder="在同一个浏览器里继续，例如：再打开第一个结果并总结"></textarea>
+      <div class="composer-row end">
+        <button class="btn btn-ghost" id="close-session">关闭浏览器</button>
+        <button class="btn btn-primary" id="send">发送</button>
       </div>
     </div>
-    <footer>由你设定目标，由你掌握控制权。<span>本地运行 · 独立会话 · 可随时停止</span></footer>
-  </main><div id="toast" role="status" hidden></div>
-</body></html>
+  </main>
+
+  <section class="browser" aria-label="浏览器视图">
+    <div class="pane-head">
+      <div class="address"><span class="lock" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="5" y="9" width="10" height="8" rx="2"/><path d="M7 9V7a3 3 0 016 0v2"/></svg></span><span id="page-url">等待新任务</span></div>
+      <span id="status" class="status-pill">就绪</span>
+    </div>
+    <div class="viewport" id="viewport">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon" aria-hidden="true"><svg viewBox="0 0 48 48"><rect x="6" y="9" width="36" height="30" rx="5"/><path d="M6 17h36"/><circle cx="11" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><circle cx="19" cy="13" r="1"/></svg></div>
+        <h3>浏览器画面会显示在这里</h3>
+        <p>开始任务后，这里实时显示代理正在操作的标签页。</p>
+      </div>
+      <img id="screenshot" alt="代理正在操作的页面" hidden>
+    </div>
+    <div class="browser-foot">
+      <span id="step-count" class="muted">等待观察页面</span>
+      <div class="controls">
+        <button class="btn btn-sm" id="pause" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4v12M13 4v12"/></svg>暂停 / 接管</button>
+        <button class="btn btn-sm" id="resume" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l10 6-10 6z"/></svg>继续执行</button>
+        <button class="btn btn-sm btn-danger-ghost" id="stop" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1.5"/></svg>停止</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="backdrop" id="backdrop" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+  <div class="drawer-head">
+    <h2 id="drawer-title">设置</h2>
+    <button class="icon-btn" id="drawer-close" aria-label="关闭设置"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="settings" class="active">模型</button>
+    <button role="tab" data-tab="browser-settings">浏览器 <span class="tab-badge" id="browser-badge">独立会话</span></button>
+    <button role="tab" data-tab="permissions-panel">网站权限</button>
+  </nav>
+
+  <section class="drawer-panel" id="settings" role="tabpanel">
+    <div class="field"><label for="provider">服务类型</label><select id="provider"><option value="anthropic">Anthropic Claude（推荐）</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI 兼容服务</option></select></div>
+    <div class="field"><label for="base-url">Base URL <span class="muted" id="base-url-hint"></span></label><input id="base-url" type="url" placeholder="留空使用 Anthropic 官方地址"></div>
+    <div class="field"><label for="model">模型名</label><input id="model" placeholder="例如 claude-opus-5-5" autocomplete="off"></div>
+    <div class="field"><label for="api-key">API Key <span class="muted" id="key-status"></span></label><input id="api-key" type="password" placeholder="仅保存在本地服务内存" autocomplete="off">
+      <label class="check"><input id="clear-key" type="checkbox">清除已保存的 Key</label></div>
+    <div class="field provider-effort"><label for="effort">思考强度（effort）</label><select id="effort"><option value="low">low</option><option value="medium">medium</option><option value="high" selected>high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div>
+    <label class="check provider-openai"><input id="vision" type="checkbox">发送截图（需模型支持视觉）</label>
+    <div class="field"><label for="reviewer-model">审查模型 <span class="muted">（自动模式，可选）</span></label><input id="reviewer-model" placeholder="留空：Claude 用 claude-haiku-5-5，其他服务用主模型" autocomplete="off"></div>
+    <p class="hint">任务、网页文字和截图会发送给所选模型服务。Key 不写入磁盘；切换服务类型或 Base URL 时需重新填写。Anthropic 留空 Key 时使用 ANTHROPIC_API_KEY 或 ant auth login 的凭据。</p>
+    <button class="btn btn-primary btn-block" id="save-config">保存模型设置</button>
+  </section>
+
+  <section class="drawer-panel" id="browser-settings" role="tabpanel" hidden>
+    <div class="field"><label for="browser-mode">浏览器</label><select id="browser-mode"><option value="ephemeral">独立会话（每次全新，不保留登录）</option><option value="persistent">持久化配置（保留登录）</option><option value="cdp">连接我正在运行的 Chrome（CDP）</option></select></div>
+    <div class="callout browser-persistent"><p>专用配置保存在本机，与个人 Chrome 分开。先打开登录浏览器手动登录需要的网站，关闭后再执行任务。</p>
+      <div class="button-row"><button class="btn" id="login-open">打开登录浏览器</button><button class="btn" id="login-close" hidden>关闭登录浏览器</button></div></div>
+    <div class="browser-cdp"><div class="field"><label for="cdp-url">CDP 地址</label><input id="cdp-url" type="url" placeholder="http://127.0.0.1:9222"></div>
+      <p class="hint">用 --remote-debugging-port=9222 启动 Chrome。代理只使用并关闭它自己打开的标签页，不会关闭你的浏览器。</p></div>
+    <div class="field"><span class="field-label">可访问的地址</span>
+      <label class="check"><input id="allow-localhost" type="checkbox">允许访问 localhost（本机开发服务器）</label>
+      <label class="check"><input id="allow-private" type="checkbox">允许访问内网地址（192.168.x.x 等）</label>
+      <p class="hint">工作台自身的地址始终禁止访问。</p></div>
+    <p class="hint" id="browser-locked" hidden>浏览器正在使用中。关闭浏览器或停止任务后才能修改这些设置。</p>
+    <button class="btn btn-primary btn-block" id="save-browser">保存浏览器设置</button>
+  </section>
+
+  <section class="drawer-panel" id="permissions-panel" role="tabpanel" hidden>
+    <div class="field"><span class="field-label">已保存的网站权限</span><div id="site-grants" class="grant-list"><p class="muted small">还没有保存的网站权限。</p></div></div>
+    <div class="field"><label for="blocked-sites">受保护网站 <span class="muted">（只读，不能操作；每行一个域名）</span></label><textarea id="blocked-sites" rows="8"></textarea></div>
+    <button class="btn btn-primary btn-block" id="save-blocked">保存受保护网站</button>
+  </section>
+</aside>
+<div id="toast" role="status" hidden></div>
+</body>
+</html>
