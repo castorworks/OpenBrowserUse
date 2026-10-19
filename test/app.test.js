@@ -84,9 +84,14 @@ before(async () => {
     }
     lastOpenAIBody = body;
     if (mockMode === 'slow') await sleep(1500);
+    // DeepSeek thinking mode: reasoning_content must come back on every assistant turn once tools are used.
+    if (mockMode === 'deepseek' && body.messages.some(m => m.role === 'assistant' && m.reasoning_content == null)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' }); res.end('{"error":"reasoning_content missing"}'); return;
+    }
     if (mockMode === 'error') { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end('{"error":"secret-echo"}'); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, ...openaiReply(body) }, finish_reason: 'stop' }] }));
+    const extra = mockMode === 'deepseek' ? { reasoning_content: `思考第 ${body.messages.length} 步` } : {};
+    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, ...extra, ...openaiReply(body) }, finish_reason: 'stop' }] }));
   });
   anthropicServer = createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -425,6 +430,22 @@ test('sessions are saved with tool cards and can be listed, replayed and deleted
   assert.ok(!after.body.sessions.some(s => s.id === id));
 });
 
+test('DeepSeek: reasoning_content is sent back during the tool loop and effort maps to reasoning_effort', async () => {
+  const saved = await post('config', { provider: 'deepseek', baseURL: `http://127.0.0.1:${openaiPort}`, model: 'deepseek-flash', apiKey: 'ds-key', effort: 'max' });
+  assert.equal(saved.body.provider, 'deepseek');
+  const defaults = await post('config', { provider: 'deepseek', model: 'deepseek-flash' });
+  assert.equal(defaults.body.baseURL, 'https://api.deepseek.com', 'empty base URL uses the DeepSeek default');
+  await post('config', { provider: 'deepseek', baseURL: `http://127.0.0.1:${openaiPort}`, model: 'deepseek-flash', apiKey: 'ds-key', effort: 'max' });
+  mockMode = 'deepseek';
+  await start({ permissionMode: 'skip' }); await until(() => !agent.busy);
+  assert.equal(agent.task.status, 'done', agent.task.result); assert.match(agent.task.result, /399/);
+  assert.equal(lastOpenAIBody.model, 'deepseek-flash'); assert.equal(lastOpenAIBody.reasoning_effort, 'max');
+  assert.equal(requestAuth, 'Bearer ds-key');
+  assert.ok(lastOpenAIBody.messages.filter(m => m.role === 'assistant').every(m => m.reasoning_content));
+  assert.ok(agent.task.events.some(e => e.kind === 'note' && e.message.startsWith('思考第')));
+  await settle(); mockMode = 'normal'; await configureOpenAI();
+});
+
 test('pause cancels pending model response, resume continues, stop ends approval wait', async () => {
   mockMode = 'slow'; const beforeRequests = requests; await start();
   await until(() => requests > beforeRequests);
@@ -490,6 +511,10 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   await page.waitForFunction(() => !document.getElementById('run').disabled);
   await page.screenshot({ path: 'artifacts/demo-complete.png', fullPage: true });
   await page.locator('#settings').evaluate(el => { el.open = true; });
+  await page.selectOption('#provider', 'deepseek');
+  assert.equal(await page.locator('#base-url').inputValue(), 'https://api.deepseek.com');
+  assert.equal(await page.locator('#model').inputValue(), 'deepseek-flash');
+  assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), false);
   await page.selectOption('#provider', 'anthropic');
   assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), false);
   assert.ok(await page.locator('.tool-card').count() >= 3, 'tool calls render as cards');

@@ -1,6 +1,6 @@
 # My Browser Use
 
-一个本地运行的 AI 浏览器代理。输入自然语言目标，模型像 Claude in Chrome 一样通过工具调用读取页面、点击、输入、切换标签页，界面显示截图、每一步工具调用和结果；完成后可以在同一个浏览器里继续对话。默认使用 Anthropic Claude（`claude-opus-5-5`），也支持兼容 OpenAI 的 Chat Completions 服务（需支持 function calling）。
+一个本地运行的 AI 浏览器代理。输入自然语言目标，模型像 Claude in Chrome 一样通过工具调用读取页面、点击、输入、切换标签页，界面显示截图、每一步工具调用和结果；完成后可以在同一个浏览器里继续对话。默认使用 Anthropic Claude（`claude-opus-5-5`），也支持 DeepSeek 和兼容 OpenAI 的 Chat Completions 服务（需支持 function calling）。
 
 ## 开始使用
 
@@ -16,6 +16,7 @@ npm start
 在“模型设置”里选择服务类型：
 
 - **Anthropic Claude**：模型默认 `claude-opus-5-5`，Base URL 留空即官方地址。Key 可在界面填写；留空时使用 `ANTHROPIC_API_KEY` 或 `ant auth login` 的凭据。“思考强度”对应 `output_config.effort`，默认 high。
+- **DeepSeek**：Base URL 留空即 `https://api.deepseek.com`，模型默认 `deepseek-flash`（也可用 `deepseek-v4-pro`），填写 DeepSeek 的 API Key（或设置 `DEEPSEEK_API_KEY`）。DeepSeek 默认开启思考模式：工具调用期间会把 `reasoning_content` 原样回传（否则接口返回 400），思考内容显示在对话中；“思考强度”映射为 `reasoning_effort`（low → low，medium / high / xhigh → high，max → max）。DeepSeek 不接收截图，代理用 read_page 等文字工具观察页面；自动模式的审查也使用同一模型。
 - **OpenAI 兼容服务**：Base URL 如 `https://api.openai.com/v1`（不要附加 `/chat/completions`），填写模型 ID 和 Key。模型必须支持 tools / function calling。“发送截图”仅在模型支持视觉时开启。
 
 保存配置，输入目标和起始网页，选择权限模式，点击“开始执行”。
@@ -85,7 +86,7 @@ MCP 服务器没有人工确认界面，因此按“跳过确认”模式运行�
 ## 环境配置
 
 ```bash
-export MODEL_PROVIDER=anthropic        # 或 openai
+export MODEL_PROVIDER=anthropic        # 或 deepseek / openai
 export MODEL_NAME=claude-opus-5-5
 export ANTHROPIC_API_KEY=...           # Anthropic；OpenAI 兼容服务用 MODEL_API_KEY / MODEL_BASE_URL
 npm start

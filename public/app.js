@@ -1,19 +1,22 @@
 const $ = id => document.getElementById(id);
 let current = null, configured = false, lastImage = null, lastEventKey = '', lastTask = null, lastFrameAt = 0, replay = null, lastStatus = '';
 const states = { starting: '启动浏览器', running: '执行中', pausing: '正在暂停', paused: '已暂停 · 可接管', approval: '等待确认', waiting_user: '需要你的帮助', stopping: '正在停止', stopped: '已停止', done: '已完成 · 可继续', failed: '执行失败' };
-const providerLabel = { anthropic: 'Claude', openai: 'OpenAI 兼容', demo: '固定脚本演示' };
+const providerLabel = { anthropic: 'Claude', deepseek: 'DeepSeek', openai: 'OpenAI 兼容', demo: '固定脚本演示' };
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').hidden = true, 6500); }
 async function api(path, data) {
   const res = await fetch(`/api/${path}`, data ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Browser-Agent': '1' }, body: JSON.stringify(data) } : {});
   const body = await res.json(); if (!res.ok) throw new Error(body.error || '请求失败'); return body;
 }
+const providerHints = {
+  anthropic: { base: '留空使用 Anthropic 官方地址', hint: '（可选）', model: '例如 claude-opus-5-5' },
+  deepseek: { base: 'https://api.deepseek.com', hint: '（默认官方地址）', model: '例如 deepseek-flash 或 deepseek-v4-pro' },
+  openai: { base: 'https://api.openai.com/v1', hint: '（含 /v1，不含 /chat/completions）', model: '服务商提供的模型 ID' },
+};
 function syncProvider() {
-  const anthropic = $('provider').value === 'anthropic';
-  document.querySelectorAll('.provider-anthropic').forEach(el => el.hidden = !anthropic);
-  document.querySelectorAll('.provider-openai').forEach(el => el.hidden = anthropic);
-  $('base-url').placeholder = anthropic ? '留空使用 Anthropic 官方地址' : 'https://api.openai.com/v1';
-  $('base-url-hint').textContent = anthropic ? '（可选）' : '（含 /v1，不含 /chat/completions）';
-  $('model').placeholder = anthropic ? '例如 claude-opus-5-5' : '服务商提供的模型 ID';
+  const provider = $('provider').value, h = providerHints[provider];
+  document.querySelectorAll('.provider-effort').forEach(el => el.hidden = provider === 'openai');
+  document.querySelectorAll('.provider-openai').forEach(el => el.hidden = provider !== 'openai');
+  $('base-url').placeholder = h.base; $('base-url-hint').textContent = h.hint; $('model').placeholder = h.model;
 }
 const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', cdp: '连接 Chrome' };
 function syncBrowserMode() {
@@ -174,8 +177,9 @@ $('history').addEventListener('toggle', () => { if ($('history').open) void load
 function handle(id, fn) { $(id).addEventListener('click', async () => { $(id).disabled = true; try { await fn(); render(await api('state')); } catch (e) { toast(e.message); } finally { $(id).disabled = false; if (current) render(current); } }); }
 $('provider').addEventListener('change', () => {
   syncProvider();
-  if ($('provider').value === 'anthropic' && !$('model').value) $('model').value = 'claude-opus-5-5';
-  if ($('provider').value === 'openai' && $('model').value.startsWith('claude-')) $('model').value = '';
+  // Switching service fills in that service's default address and model.
+  const defaults = current?.config.defaults;
+  if (defaults) { $('base-url').value = defaults.baseURL[$('provider').value] || ''; $('model').value = defaults.model[$('provider').value] || ''; }
 });
 handle('save-config', async () => {
   const config = await api('config', { provider: $('provider').value, baseURL: $('base-url').value.trim(), model: $('model').value.trim(), apiKey: $('api-key').value.trim(), clearKey: $('clear-key').checked, effort: $('effort').value, vision: $('vision').checked, reviewerModel: $('reviewer-model').value.trim() });

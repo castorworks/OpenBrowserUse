@@ -11,13 +11,16 @@ import { MODES } from './lib/permissions/policy.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 
+const DEFAULT_BASE_URLS = { anthropic: '', openai: 'https://api.openai.com/v1', deepseek: 'https://api.deepseek.com' };
+const DEFAULT_MODELS = { anthropic: DEFAULT_ANTHROPIC_MODEL, openai: '', deepseek: 'deepseek-flash' };
+
 function defaultConfig(env = process.env) {
-  const provider = env.MODEL_PROVIDER === 'openai' ? 'openai' : 'anthropic';
+  const provider = ['openai', 'deepseek'].includes(env.MODEL_PROVIDER) ? env.MODEL_PROVIDER : 'anthropic';
   return {
     provider,
-    baseURL: env.MODEL_BASE_URL || (provider === 'openai' ? 'https://api.openai.com/v1' : ''),
-    model: env.MODEL_NAME || (provider === 'anthropic' ? DEFAULT_ANTHROPIC_MODEL : ''),
-    apiKey: env.MODEL_API_KEY || '',
+    baseURL: env.MODEL_BASE_URL || DEFAULT_BASE_URLS[provider],
+    model: env.MODEL_NAME || DEFAULT_MODELS[provider],
+    apiKey: env.MODEL_API_KEY || (provider === 'deepseek' ? env.DEEPSEEK_API_KEY || '' : ''),
     effort: 'high', vision: false,
     browser: {
       mode: ['persistent', 'cdp'].includes(env.BROWSER_MODE) ? env.BROWSER_MODE : 'ephemeral',
@@ -45,7 +48,7 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     next();
   });
   app.use(express.json({ limit: '64kb' }));
-  const publicConfig = () => ({ ...config, apiKey: undefined, hasKey: Boolean(config.apiKey), envKey: config.provider === 'anthropic' && !config.apiKey && Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN) });
+  const publicConfig = () => ({ ...config, apiKey: undefined, hasKey: Boolean(config.apiKey), envKey: config.provider === 'anthropic' && !config.apiKey && Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN), defaults: { baseURL: DEFAULT_BASE_URLS, model: DEFAULT_MODELS } });
   const fullState = () => ({ config: publicConfig(), task: agent.state(), busy: agent.busy, loginOpen: Boolean(agent.login), permissions: agent.permissions.list() });
   app.get('/api/state', (req, res) => res.json(fullState()));
   // Server-sent events: `state` whenever it changes (checked every 200 ms) and `frame` for the live view.
@@ -74,12 +77,12 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
   app.post('/api/config', (req, res) => {
     if (agent.busy) return res.status(409).json({ error: '请停止任务后再修改模型配置。' });
     const parsed = z.object({
-      provider: z.enum(['anthropic', 'openai']).default('anthropic'), baseURL: z.string().trim().max(3000).default(''),
+      provider: z.enum(['anthropic', 'openai', 'deepseek']).default('anthropic'), baseURL: z.string().trim().max(3000).default(''),
       model: z.string().trim().min(1).max(200), apiKey: z.string().max(4000).optional(), clearKey: z.boolean().optional(),
       effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'), vision: z.boolean().default(false), reviewerModel: z.string().trim().max(200).default(''),
     }).parse(req.body);
-    const baseURL = parsed.baseURL.replace(/\/$/, '');
-    if (parsed.provider === 'openai' || baseURL) apiEndpoint(parsed.provider === 'openai' ? baseURL : `${baseURL}/v1`);
+    const baseURL = parsed.baseURL.replace(/\/$/, '') || DEFAULT_BASE_URLS[parsed.provider];
+    if (parsed.provider !== 'anthropic' || baseURL) apiEndpoint(parsed.provider !== 'anthropic' ? baseURL : `${baseURL}/v1`);
     // A key belongs to one provider + endpoint; switching either drops it.
     const sameService = parsed.provider === config.provider && baseURL === config.baseURL;
     config = { ...config, provider: parsed.provider, baseURL, model: parsed.model, apiKey: parsed.clearKey ? '' : (parsed.apiKey || (sameService ? config.apiKey : '')), effort: parsed.effort, vision: parsed.vision, reviewerModel: parsed.reviewerModel };
