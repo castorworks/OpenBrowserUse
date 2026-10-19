@@ -59,7 +59,8 @@ before(async () => {
   const extensionPath = resolve('extension');
   chrome = await chromium.launchPersistentContext(userDir, {
     executablePath, headless: true, viewport: null,
-    args: ['--window-size=1600,1000', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
+    // A 2x display, like a Retina Mac, so CSS and device pixels differ.
+    args: ['--window-size=1600,1000', '--force-device-scale-factor=2', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
   });
   worker = chrome.serviceWorkers()[0] || await chrome.waitForEvent('serviceworker');
 });
@@ -119,12 +120,38 @@ test('agent runs in the user\'s Chrome through the extension, only in its own ta
     return { width: innerWidth, height: innerHeight };
   });
   assert.ok(size.width > 1280, 'extension preserves the large native viewport');
+  // Watch what the tab actually renders, from this test's own DevTools session, while screenshots are taken.
+  await page.evaluate(() => { window.agentTab = true; });
+  const visible = (await Promise.all(chrome.pages().map(async p => (await p.evaluate(() => window.agentTab).catch(() => false)) && p))).find(Boolean);
+  const cdp = await chrome.newCDPSession(visible);
+  const rendered = [];
+  cdp.on('Page.screencastFrame', ({ metadata, sessionId }) => { rendered.push(`${metadata.deviceWidth}x${metadata.deviceHeight}`); cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {}); });
+  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 30, maxWidth: 400, maxHeight: 300 });
+  await until(() => rendered.length > 0);
+  let full;
   for (let i = 0; i < 3; i++) {
-    const data = await agent.browser.screenshot({ format: 'png' });
+    const data = await agent.browser.screenshot({ format: i ? 'jpeg' : 'png' });
+    if (i) { assert.match(data, /^data:image\/jpeg;base64,\/9j\//); continue; }
     const png = Buffer.from(data.split(',')[1], 'base64');
     assert.equal(png.readUInt32BE(16), size.width, 'screenshot and click coordinates use CSS pixels');
     assert.equal(png.readUInt32BE(20), size.height);
+    full = data;
   }
+  const zoom = await computerTool.run({ action: 'zoom', region: [40, 20, 440, 220] }, { browser: agent.browser });
+  const crop = Buffer.from(zoom.image.split(',')[1], 'base64');
+  assert.deepEqual([crop.readUInt32BE(16), crop.readUInt32BE(20)], [400, 200], 'zoom crops in CSS pixels');
+  const checker = await chrome.newPage();
+  const difference = await checker.evaluate(async ([a, b]) => {
+    const pixels = async (src, x, y) => { const c = new OffscreenCanvas(400, 200).getContext('2d'); c.drawImage(await createImageBitmap(await (await fetch(src)).blob()), x, y, 400, 200, 0, 0, 400, 200); return c.getImageData(0, 0, 400, 200).data; };
+    const [p, q] = await Promise.all([pixels(a, 40, 20), pixels(b, 0, 0)]);
+    let sum = 0; for (let i = 0; i < p.length; i++) sum += Math.abs(p[i] - q[i]);
+    return sum / p.length;
+  }, [full, zoom.image]);
+  await checker.close();
+  assert.ok(difference < 2, `zoom shows the same pixels as that region of the full screenshot (mean difference ${difference})`);
+  await sleep(300);
+  await cdp.send('Page.stopScreencast'); await cdp.detach();
+  assert.deepEqual(rendered.filter(s => s !== `${size.width}x${size.height}`), [], 'screenshots never re-render the visible tab at another size (the flash)');
   assert.equal(await page.evaluate(() => window.resizeCount), 0, 'repeated screenshots do not resize the visible page');
   await computerTool.run({ action: 'hover', coordinate: [size.width - 10, 20] }, { browser: agent.browser });
   await assert.rejects(computerTool.run({ action: 'hover', coordinate: [size.width + 10, 20] }, { browser: agent.browser }), /coordinate must be inside/);

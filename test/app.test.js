@@ -1,4 +1,4 @@
-import test, { before, after } from 'node:test';
+import test, { before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
@@ -113,6 +113,8 @@ before(async () => {
   await new Promise(r => siteServer.listen(sitePort, '127.0.0.1', r));
   browser = await chromium.launch({ headless: true, ...launchChannel(detectChannel()) });
 });
+// A test that fails midway can leave the agent waiting at a gate; stop it so the next test starts clean.
+afterEach(async () => { await settle(); mockMode = 'normal'; reviewerVerdict = 'safe'; });
 after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, anthropicServer, siteServer].map(s => new Promise(r => s.close(r)))); agent.sessions.close(); await rm(dataDir, { recursive: true, force: true }); });
 
 test('URL guard, endpoints, key names and tool schemas', () => {
@@ -409,7 +411,11 @@ async function readEvents(want, timeout = 20000) {
   const events = []; let buffer = '';
   try {
     while (!want(events)) {
-      const { value, done } = await reader.read(); if (done) break;
+      const { value, done } = await reader.read().catch(error => {
+        if (!controller.signal.aborted) throw error;
+        throw new Error(`No matching events after ${timeout} ms: ${events.filter(e => e.type === 'frame').length} frames, ${events.filter(e => e.type === 'state').length} states. Task: ${agent.task?.status}, ${JSON.stringify(agent.task?.events.slice(-3))}`);
+      });
+      if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let i;
       while ((i = buffer.indexOf('\n\n')) >= 0) {
@@ -436,6 +442,18 @@ test('live updates: SSE pushes state changes and screencast frames; messages ste
   await settle(); mockMode = 'normal';
 });
 
+test('live view shows a page that finished painting before it attached', async () => {
+  const session = new BrowserSession({ demoOrigin: origin, headless: true });
+  await session.open();
+  try {
+    await session.navigate(origin + '/demo'); await sleep(1000);
+    const frames = [];
+    await session.screencast(data => frames.push(data));
+    await until(() => frames.length > 0, 5000);
+    assert.ok(Buffer.from(frames[0], 'base64').subarray(0, 2).equals(Buffer.from([0xff, 0xd8])), 'frame is a JPEG');
+  } finally { await session.close(); }
+});
+
 test('sessions are saved with tool cards and can be listed, replayed and deleted', async () => {
   mockMode = 'normal'; await configureOpenAI();
   await start({ permissionMode: 'skip' }); await until(() => !agent.busy);
@@ -449,8 +467,20 @@ test('sessions are saved with tool cards and can be listed, replayed and deleted
   assert.match(saved.result, /399/);
   assert.equal(saved.snapshot.screenshot, undefined, 'screenshots are not stored');
   assert.equal((await fetch(`${origin}/api/sessions/00000000-0000-4000-8000-000000000000`)).status, 404);
-  const after = await post('sessions/delete', { id });
-  assert.ok(!after.body.sessions.some(s => s.id === id));
+  // Deleted by hand from the history sidebar: the first click only asks for confirmation.
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.goto(origin);
+  const row = page.locator(`.history-row[data-id="${id}"]`);
+  await row.hover();
+  await row.locator('.history-delete').click();
+  assert.equal(await row.locator('.history-delete').textContent(), '确认删除');
+  assert.ok((await agent.sessions.list()).some(s => s.id === id), 'one click does not delete');
+  await row.locator('.history-delete').click();
+  await row.waitFor({ state: 'detached' });
+  assert.ok(!(await agent.sessions.list()).some(s => s.id === id));
+  await page.close();
+  await agent.save();
+  assert.ok(!(await agent.sessions.list()).some(s => s.id === id), 'the deleted current task is not saved again');
 });
 
 test('DeepSeek: real image crops reach the API with original detail and reasoning_content preserved', async () => {

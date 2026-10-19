@@ -97,9 +97,40 @@ async function handle(method, params) {
       if (!attached.has(target.tabId)) throw new Error('标签页未连接调试器。');
       return chrome.debugger.sendCommand(target, cdpMethod, cdpParams);
     }
+    case 'tabs.screenshot': {
+      const [tabId, options] = params;
+      requireAgentTab(tabId);
+      if (!attached.has(tabId)) throw new Error('标签页未连接调试器。');
+      return screenshot({ tabId }, options);
+    }
     case 'session.end': await endSession(); return {};
     default: throw new Error(`未知命令 ${method}`);
   }
+}
+
+// Page.captureScreenshot with a clip makes Chrome re-render the visible tab with an emulated
+// viewport while it captures (the page shrinks or jumps for a frame). Capture the viewport as the
+// user sees it and cut out the clip Playwright asked for here, at the size Chrome would return.
+async function screenshot(target, { format = 'png', quality, clip }) {
+  const send = (method, params) => chrome.debugger.sendCommand(target, method, params);
+  const metrics = await send('Page.getLayoutMetrics');
+  const shot = await send('Page.captureScreenshot', { format: format === 'jpeg' ? 'jpeg' : 'png', quality: format === 'jpeg' ? 95 : undefined, optimizeForSpeed: true });
+  const bytes = atob(shot.data), buffer = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
+  const image = await createImageBitmap(new Blob([buffer]));
+  // The same device pixel ratio and viewport origin Playwright used to build the clip.
+  const ratio = metrics.contentSize.width / metrics.cssContentSize.width || 1;
+  const { pageX, pageY, scale: zoom } = metrics.visualViewport;
+  const width = Math.max(1, Math.round(clip.width * (clip.scale ?? 1) * ratio)), height = Math.max(1, Math.round(clip.height * (clip.scale ?? 1) * ratio));
+  const canvas = new OffscreenCanvas(width, height), context = canvas.getContext('2d');
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(image, (clip.x - pageX) * ratio, (clip.y - pageY) * ratio, clip.width * zoom * ratio, clip.height * zoom * ratio, 0, 0, width, height);
+  image.close();
+  const blob = await canvas.convertToBlob({ type: `image/${format}`, quality: quality == null ? undefined : quality / 100 });
+  const out = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < out.length; i += 0x8000) binary += String.fromCharCode(...out.subarray(i, i + 0x8000));
+  return { data: btoa(binary) };
 }
 
 // Release the debugger; tabs stay open so the user can look at what the agent left.

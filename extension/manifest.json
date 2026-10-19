@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Open Browser Use",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Let the Open Browser Use agent work in your Chrome, in its own tab group, with your logins.",
   "minimum_chrome_version": "125",
   "permissions": ["debugger", "tabs", "tabGroups", "storage", "sidePanel", "alarms"],

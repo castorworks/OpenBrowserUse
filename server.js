@@ -81,7 +81,7 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
   });
   app.post('/api/sessions/delete', async (req, res) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.body);
-    await agent.sessions.remove(id); res.json({ sessions: await agent.sessions.list() });
+    await agent.deleteSession(id); res.json({ sessions: await agent.sessions.list() });
   });
   app.post('/api/config', (req, res) => {
     if (agent.busy) return res.status(409).json({ error: '请停止任务后再修改模型配置。' });

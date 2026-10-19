@@ -192,18 +192,48 @@ function connect() {
   source.onerror = offline;
 }
 async function loadHistory() {
-  try {
-    const { sessions } = await api('sessions');
-    $('history-count').textContent = sessions.length ? String(sessions.length) : '';
-    if (!sessions.length) { $('history-list').replaceChildren(el('p', 'muted small', '还没有保存的会话。')); return; }
-    $('history-list').replaceChildren(...sessions.map(s => {
-      const item = el('button', `history-item ${s.status}${replay?.id === s.id ? ' active' : ''}`);
-      item.title = s.goal;
-      item.append(el('strong', '', s.goal), el('span', '', `${states[s.status]?.split(' ·')[0] || s.status} · ${new Date(s.updated).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`));
-      item.onclick = () => { $('sidebar').classList.remove('open'); void openReplay(s.id); };
-      return item;
-    }));
-  } catch (e) { toast(e.message); }
+  try { renderHistory((await api('sessions')).sessions); } catch (e) { toast(e.message); }
+}
+function renderHistory(sessions) {
+  $('history-count').textContent = sessions.length ? String(sessions.length) : '';
+  if (!sessions.length) { $('history-list').replaceChildren(el('p', 'muted small', '还没有保存的会话。')); return; }
+  $('history-list').replaceChildren(...sessions.map(s => {
+    const row = el('div', 'history-row'); row.dataset.id = s.id;
+    const item = el('button', `history-item ${s.status}${replay?.id === s.id ? ' active' : ''}`);
+    item.title = s.goal;
+    item.append(el('strong', '', s.goal), el('span', '', `${states[s.status]?.split(' ·')[0] || s.status} · ${new Date(s.updated).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`));
+    item.onclick = () => { $('sidebar').classList.remove('open'); void openReplay(s.id); };
+    row.append(item, deleteButton(s));
+    return row;
+  }));
+}
+// Deleting takes two clicks: the first turns the button into “确认删除” for a few seconds.
+function deleteButton(session) {
+  const button = el('button', 'history-delete');
+  const reset = () => { clearTimeout(button.timer); button.classList.remove('confirm'); button.replaceChildren(trashIcon()); button.title = '删除会话'; };
+  button.setAttribute('aria-label', `删除会话：${session.goal}`);
+  reset();
+  button.onblur = reset;
+  button.onclick = async () => {
+    if (!button.classList.contains('confirm')) {
+      button.classList.add('confirm'); button.textContent = '确认删除'; button.title = '再点一次删除，无法恢复';
+      button.timer = setTimeout(reset, 4000); return;
+    }
+    reset(); button.disabled = true;
+    try {
+      const { sessions } = await api('sessions/delete', { id: session.id });
+      if (replay?.id === session.id) exitReplay();
+      renderHistory(sessions); toast('会话已删除。');
+    } catch (e) { button.disabled = false; toast(e.message); }
+  };
+  return button;
+}
+function trashIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 20 20'); svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10');
+  svg.append(path); return svg;
 }
 async function openReplay(id) {
   try {
