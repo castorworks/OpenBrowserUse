@@ -69,11 +69,11 @@
       <textarea id="goal" rows="2" placeholder="描述目标，例如：打开 Playwright 官网，找到浏览器支持列表，并用中文整理结果。"></textarea>
       <div class="composer-row">
         <label class="field-inline url-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c2.5 2.2 2.5 11.8 0 14M10 3c-2.5 2.2-2.5 11.8 0 14"/></svg><span class="sr-only">起始网页</span><input id="start-url" type="url" value="https://example.com" placeholder="起始网页 https://…"></label>
-        <label class="field-inline" title="权限模式"><span class="sr-only">权限</span><select id="permission-mode"><option value="ask">逐步确认</option><option value="auto">自动 · 审查风险</option><option value="skip">跳过确认</option></select></label>
+        <label class="field-inline" title="权限模式"><span class="sr-only">权限</span><select id="permission-mode"><option value="ask">逐步确认</option><option value="auto">自动 · 审查风险</option><option value="skip" selected>直接执行 · 无限制</option></select></label>
         <label class="field-inline steps" title="最多步数">最多<input id="max-steps" type="number" min="1" max="200" value="50">步</label>
         <button class="btn btn-primary" id="run">开始执行<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10h10m0 0l-4-4m4 4l-4 4"/></svg></button>
       </div>
-      <p class="hint" id="mode-hint">每次点击、输入前都请你确认；首次访问新网站时也会询问。</p>
+      <p class="hint" id="mode-hint">直接执行所有浏览器工具；不进行网站、字段或脚本权限拦截。</p>
     </div>
 
     <div class="composer" id="follow-up-box" hidden>
@@ -126,12 +126,12 @@
     <div class="field"><label for="provider">服务类型</label><select id="provider"><option value="anthropic">Anthropic Claude（推荐）</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI 兼容服务</option></select></div>
     <div class="field"><label for="base-url">Base URL <span class="muted" id="base-url-hint"></span></label><input id="base-url" type="url" placeholder="留空使用 Anthropic 官方地址"></div>
     <div class="field"><label for="model">模型名</label><input id="model" placeholder="例如 claude-opus-5-5" autocomplete="off"></div>
-    <div class="field"><label for="api-key">API Key <span class="muted" id="key-status"></span></label><input id="api-key" type="password" placeholder="仅保存在本地服务内存" autocomplete="off">
+    <div class="field"><label for="api-key">API Key <span class="muted" id="key-status"></span></label><input id="api-key" type="password" placeholder="保存在本机，重启后自动恢复" autocomplete="off">
       <label class="check"><input id="clear-key" type="checkbox">清除已保存的 Key</label></div>
     <div class="field provider-effort"><label for="effort">思考强度（effort）</label><select id="effort"><option value="low">low</option><option value="medium">medium</option><option value="high" selected>high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div>
-    <label class="check provider-openai"><input id="vision" type="checkbox">发送截图（需模型支持视觉）</label>
+    <label class="check provider-openai"><input id="vision" type="checkbox">发送截图（DeepSeek 图像识别使用 deepseek-flash）</label>
     <div class="field"><label for="reviewer-model">审查模型 <span class="muted">（自动模式，可选）</span></label><input id="reviewer-model" placeholder="留空：Claude 用 claude-haiku-5-5，其他服务用主模型" autocomplete="off"></div>
-    <p class="hint">任务、网页文字和截图会发送给所选模型服务。Key 不写入磁盘；切换服务类型或 Base URL 时需重新填写。Anthropic 留空 Key 时使用 ANTHROPIC_API_KEY 或 ant auth login 的凭据。</p>
+    <p class="hint">任务、网页文字和截图会发送给所选模型服务。Key 明文保存在本机用户目录，重启自动恢复；切换服务类型或 Base URL 时需重新填写。Anthropic 留空 Key 时使用 ANTHROPIC_API_KEY 或 ant auth login 的凭据。</p>
     <button class="btn btn-primary btn-block" id="save-config">保存模型设置</button>
   </section>
 
@@ -142,16 +142,16 @@
     <div class="browser-cdp"><div class="field"><label for="cdp-url">CDP 地址</label><input id="cdp-url" type="url" placeholder="http://127.0.0.1:9222"></div>
       <p class="hint">用 --remote-debugging-port=9222 启动 Chrome。代理只使用并关闭它自己打开的标签页，不会关闭你的浏览器。</p></div>
     <div class="field"><span class="field-label">可访问的地址</span>
-      <label class="check"><input id="allow-localhost" type="checkbox">允许访问 localhost（本机开发服务器）</label>
-      <label class="check"><input id="allow-private" type="checkbox">允许访问内网地址（192.168.x.x 等）</label>
-      <p class="hint">工作台自身的地址始终禁止访问。</p></div>
+      <label class="check"><input id="allow-localhost" type="checkbox" disabled>允许访问 localhost（本机开发服务器）</label>
+      <label class="check"><input id="allow-private" type="checkbox" disabled>允许访问内网地址（192.168.x.x 等）</label>
+      <p class="hint">地址访问不受限制；旧选项仅为兼容保留，不再生效。</p></div>
     <p class="hint" id="browser-locked" hidden>浏览器正在使用中。关闭浏览器或停止任务后才能修改这些设置。</p>
     <button class="btn btn-primary btn-block" id="save-browser">保存浏览器设置</button>
   </section>
 
   <section class="drawer-panel" id="permissions-panel" role="tabpanel" hidden>
     <div class="field"><span class="field-label">已保存的网站权限</span><div id="site-grants" class="grant-list"><p class="muted small">还没有保存的网站权限。</p></div></div>
-    <div class="field"><label for="blocked-sites">受保护网站 <span class="muted">（只读，不能操作；每行一个域名）</span></label><textarea id="blocked-sites" rows="8"></textarea></div>
+    <div class="field"><label for="blocked-sites">受保护网站 <span class="muted">（仅逐步确认/自动审查模式生效；每行一个域名）</span></label><textarea id="blocked-sites" rows="8"></textarea></div>
     <button class="btn btn-primary btn-block" id="save-blocked">保存受保护网站</button>
   </section>
 </aside>

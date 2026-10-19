@@ -8,6 +8,7 @@ import { allowedURL, localCDPURL } from './lib/browser/url.js';
 import { Agent } from './lib/agent.js';
 import { DEFAULT_BLOCKED_SITES } from './lib/permissions/rules.js';
 import { MODES } from './lib/permissions/policy.js';
+import { ConfigStore } from './lib/config-store.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 
@@ -21,7 +22,7 @@ function defaultConfig(env = process.env) {
     baseURL: env.MODEL_BASE_URL || DEFAULT_BASE_URLS[provider],
     model: env.MODEL_NAME || DEFAULT_MODELS[provider],
     apiKey: env.MODEL_API_KEY || (provider === 'deepseek' ? env.DEEPSEEK_API_KEY || '' : ''),
-    effort: 'high', vision: false,
+    effort: 'high', vision: provider === 'deepseek',
     browser: {
       mode: ['persistent', 'cdp'].includes(env.BROWSER_MODE) ? env.BROWSER_MODE : 'ephemeral',
       cdpURL: env.BROWSER_CDP_URL || 'http://127.0.0.1:9222', allowLocalhost: env.BROWSER_ALLOW_LOCALHOST !== '0', allowPrivateNetwork: env.BROWSER_ALLOW_PRIVATE === '1',
@@ -35,7 +36,8 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
   const origin = `http://127.0.0.1:${port}`;
   const app = express();
   const agent = new Agent(origin, { profileDir: env.BROWSER_PROFILE_DIR, dataDir, ...browserOptions });
-  let config = defaultConfig(env);
+  const configStore = new ConfigStore({ dir: dataDir });
+  let config = { ...defaultConfig(env), ...configStore.load() };
   app.disable('x-powered-by');
   app.use((req, res, next) => {
     if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host)) return res.status(403).json({ error: 'Host not allowed' });
@@ -79,13 +81,15 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     const parsed = z.object({
       provider: z.enum(['anthropic', 'openai', 'deepseek']).default('anthropic'), baseURL: z.string().trim().max(3000).default(''),
       model: z.string().trim().min(1).max(200), apiKey: z.string().max(4000).optional(), clearKey: z.boolean().optional(),
-      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'), vision: z.boolean().default(false), reviewerModel: z.string().trim().max(200).default(''),
+      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'), vision: z.boolean().optional(), reviewerModel: z.string().trim().max(200).default(''),
     }).parse(req.body);
     const baseURL = parsed.baseURL.replace(/\/$/, '') || DEFAULT_BASE_URLS[parsed.provider];
     if (parsed.provider !== 'anthropic' || baseURL) apiEndpoint(parsed.provider !== 'anthropic' ? baseURL : `${baseURL}/v1`);
     // A key belongs to one provider + endpoint; switching either drops it.
     const sameService = parsed.provider === config.provider && baseURL === config.baseURL;
-    config = { ...config, provider: parsed.provider, baseURL, model: parsed.model, apiKey: parsed.clearKey ? '' : (parsed.apiKey || (sameService ? config.apiKey : '')), effort: parsed.effort, vision: parsed.vision, reviewerModel: parsed.reviewerModel };
+    const nextConfig = { ...config, provider: parsed.provider, baseURL, model: parsed.model, apiKey: parsed.clearKey ? '' : (parsed.apiKey || (sameService ? config.apiKey : '')), effort: parsed.effort, vision: parsed.vision ?? (parsed.provider === 'deepseek'), reviewerModel: parsed.reviewerModel };
+    configStore.save(nextConfig);
+    config = nextConfig;
     res.json(publicConfig());
   });
   app.post('/api/browser', (req, res) => {
@@ -106,7 +110,7 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     agent.permissions.revoke(site); res.json({ permissions: agent.permissions.list() });
   });
   app.post('/api/tasks', async (req, res) => {
-    const input = z.object({ goal: z.string().trim().min(1).max(8000), startURL: z.string().max(4000).default('https://example.com'), maxSteps: z.number().int().min(1).max(200).default(50), permissionMode: z.enum(MODES).default('ask'), demo: z.boolean().default(false) }).parse(req.body);
+    const input = z.object({ goal: z.string().trim().min(1).max(8000), startURL: z.string().max(4000).default('https://example.com'), maxSteps: z.number().int().min(1).max(200).default(50), permissionMode: z.enum(MODES).default('skip'), demo: z.boolean().default(false) }).parse(req.body);
     if (agent.busy) return res.status(409).json({ error: '已有任务正在执行。' });
     if (!input.demo) { if (!config.model) throw new Error('请先在模型设置中填写模型名。'); allowedURL(input.startURL, origin, config.browser); }
     await agent.start(input, config); res.status(202).json({ ok: true });

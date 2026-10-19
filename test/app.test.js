@@ -45,8 +45,9 @@ function openaiReply(body) {
   const answered = msgs.some(m => m.role === 'tool' && m.content.startsWith('用户回复'));
   if (mockMode === 'question' && !answered) return call('ask_user', { question: '请确认要搜索的商品' });
   if (!called.includes('read_page')) return call('read_page', {});
+  if (mockMode === 'deepseek' && !msgs.some(m => m.tool_calls?.some(c => c.function.name === 'computer' && JSON.parse(c.function.arguments).action === 'zoom'))) return call('computer', { action: 'zoom', region: [0, 0, 160, 80] });
   if (!called.includes('form_input')) return call('form_input', { ref: ref('产品关键词'), value: '键盘' });
-  if (!called.includes('computer')) return call('computer', { action: 'left_click', ref: ref('搜索产品') });
+  if (!msgs.some(m => m.tool_calls?.some(c => c.function.name === 'computer' && JSON.parse(c.function.arguments).action === 'left_click'))) return call('computer', { action: 'left_click', ref: ref('搜索产品') });
   if (!called.includes('get_page_text')) return call('get_page_text', {});
   if (toolText.includes('搜索结果：键盘')) return { content: '轻音机械键盘，¥ 399。来源：本地演示页。' };
   return { content: '没有找到结果。' };
@@ -112,19 +113,19 @@ before(async () => {
   await new Promise(r => siteServer.listen(sitePort, '127.0.0.1', r));
   browser = await chromium.launch({ headless: true, ...launchChannel(detectChannel()) });
 });
-after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, anthropicServer, siteServer].map(s => new Promise(r => s.close(r)))); await rm(dataDir, { recursive: true, force: true }); });
+after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, anthropicServer, siteServer].map(s => new Promise(r => s.close(r)))); agent.sessions.close(); await rm(dataDir, { recursive: true, force: true }); });
 
 test('URL guard, endpoints, key names and tool schemas', () => {
-  assert.throws(() => allowedURL('file:///etc/passwd', origin));
-  assert.throws(() => allowedURL(origin + '/api/state', origin));
-  assert.throws(() => allowedURL('http://10.0.0.1', origin));
+  assert.equal(allowedURL('file:///tmp/example', origin), 'file:///tmp/example');
+  assert.equal(allowedURL(origin + '/api/state', origin), origin + '/api/state');
+  assert.equal(allowedURL('http://10.0.0.1', origin), 'http://10.0.0.1/');
   assert.equal(allowedURL('http://2130706433:3000', origin), 'http://127.0.0.1:3000/', 'localhost dev servers allowed by default');
-  assert.throws(() => allowedURL('http://localhost:3000', origin, { allowLocalhost: false }), /localhost/);
-  for (const own of [`http://localhost:${port}/api/state`, `http://0.0.0.0:${port}/api/state`, `http://[::1]:${port}/`, `http://127.0.0.2:${port}/demo`]) assert.throws(() => allowedURL(own, origin), /工作台/, own);
+  assert.equal(allowedURL('http://localhost:3000', origin, { allowLocalhost: false }), 'http://localhost:3000/');
+  for (const own of [`http://localhost:${port}/api/state`, `http://0.0.0.0:${port}/api/state`, `http://[::1]:${port}/`, `http://127.0.0.2:${port}/demo`]) assert.equal(allowedURL(own, origin), new URL(own).href);
   assert.equal(allowedURL('http://192.168.1.5/', origin, { allowLocalhost: true, allowPrivateNetwork: true }), 'http://192.168.1.5/');
   assert.equal(localCDPURL('http://127.0.0.1:9222/'), 'http://127.0.0.1:9222');
-  assert.throws(() => localCDPURL('http://example.com:9222'));
-  assert.throws(() => localCDPURL('http://127.0.0.1'));
+  assert.equal(localCDPURL('http://example.com:9222'), 'http://example.com:9222');
+  assert.equal(localCDPURL('https://example.com'), 'https://example.com');
   assert.equal(allowedURL(origin + '/demo', origin), origin + '/demo');
   assert.equal(apiEndpoint('https://example.com/v1/'), 'https://example.com/v1/chat/completions');
   assert.throws(() => apiEndpoint('http://example.com/v1'));
@@ -157,6 +158,14 @@ test('OpenAI provider keeps only the latest screenshots', () => {
   assert.equal(count(p.messages), 4, 'stored history is not edited');
 });
 
+test('DeepSeek vision defaults on, supports opt-out, and does not enable generic providers', () => {
+  for (const [provider, vision, expected] of [['deepseek', undefined, true], ['deepseek', false, false], ['openai', undefined, false]]) {
+    const p = new OpenAIProvider({ provider, vision, baseURL: 'https://example.com', model: 'm' }, { system: 's', tools: [] });
+    p.addToolResults([{ id: 'shot', text: 'screenshot', image: 'data:image/png;base64,AAAA' }]); p.flush();
+    assert.equal(p.outgoing().some(m => Array.isArray(m.content) && m.content.some(c => c.type === 'image_url')), expected);
+  }
+});
+
 test('read_page reaches iframes and shadow DOM; refs stay stable and act across frames', async () => {
   const session = new BrowserSession({ demoOrigin: origin, headless: true });
   await session.open();
@@ -184,7 +193,15 @@ test('read_page reaches iframes and shadow DOM; refs stay stable and act across 
     assert.match(shot.image, /^data:image\/jpeg;base64,/);
     await session.current().setContent('<input type="password" id="p">');
     const pw = /ref_\d+/.exec((await getTool('read_page').run({ filter: 'interactive', max_chars: 2000 }, { browser: session })).text)[0];
-    await assert.rejects(getTool('form_input').run({ ref: pw, value: 'x' }, { browser: session }), /密码/);
+    await getTool('form_input').run({ ref: pw, value: 'x' }, { browser: session });
+    await getTool('computer').run({ action: 'left_click', ref: pw }, { browser: session });
+    await getTool('computer').run({ action: 'type', text: 'y' }, { browser: session });
+    await getTool('computer').run({ action: 'type', ref: pw, text: 'z' }, { browser: session });
+    assert.equal(await session.current().locator('#p').inputValue(), 'xyz');
+    await session.current().setContent('<input type="file" id="upload">');
+    const uploadRef = /ref_\d+/.exec((await getTool('read_page').run({ filter: 'interactive', max_chars: 2000 }, { browser: session })).text)[0];
+    await getTool('form_input').run({ ref: uploadRef, value: new URL('../package.json', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, '$1') }, { browser: session });
+    assert.equal(await session.current().locator('#upload').evaluate(el => el.files[0].name), 'package.json');
   } finally { await session.close(); }
 });
 
@@ -205,7 +222,7 @@ test('permission policy: modes, site approval, rules, blocklist and reviewer', a
     assert.equal((await run('ask', 'navigate', { url: 'back' })).action, 'run');
     assert.equal((await run('ask', 'computer', click)).action, 'ask');
     assert.equal((await run('skip', 'computer', click)).action, 'run');
-    assert.equal((await run('skip', 'javascript', { code: 'return 1' })).action, 'ask', 'javascript always asks');
+    assert.equal((await run('skip', 'javascript', { code: 'return 1' })).action, 'run', 'javascript runs directly');
     // auto: reviewer decides plain actions on allowed sites
     assert.equal((await run('auto', 'computer', click)).action, 'run'); assert.equal(reviews, 1);
     verdict = 'block'; assert.equal((await run('auto', 'computer', click)).action, 'block');
@@ -217,23 +234,23 @@ test('permission policy: modes, site approval, rules, blocklist and reviewer', a
     target = { label: 'Continue', tag: 'button', submit: true, inForm: true, crossOriginForm: true, formOrigin: 'https://evil.example' };
     assert.match((await run('auto', 'computer', click)).reason, /evil\.example/);
     target = { label: '密码', type: 'password', password: true };
-    assert.equal((await run('skip', 'form_input', { ref: 'ref_1', value: 'x' })).action, 'block');
+    assert.equal((await run('skip', 'form_input', { ref: 'ref_1', value: 'x' })).action, 'run');
     target = { label: 'Card', name: 'cardnumber', autocomplete: 'cc-number' };
-    assert.equal((await run('skip', 'form_input', { ref: 'ref_1', value: '4111' })).action, 'block');
+    assert.equal((await run('skip', 'form_input', { ref: 'ref_1', value: '4111' })).action, 'run');
     // new site in auto asks for the site before calling the reviewer
     target = { label: 'Go', tag: 'button' }; pageURL = 'https://new.example/';
     const fresh = await run('auto', 'computer', click); assert.equal(fresh.source, 'site'); assert.equal(reviews, 3);
     // protected sites: read-only in every mode
     pageURL = 'https://secure.chase.com/account';
-    assert.equal((await run('skip', 'computer', click)).source, 'blocklist');
+    assert.equal((await run('skip', 'computer', click, { blockedSites: ['chase.com'] })).action, 'run');
     assert.equal((await run('skip', 'get_page_text', { max_chars: 1000 })).action, 'run');
-    assert.ok(isBlockedSite('binance.com')); assert.ok(!isBlockedSite('notchase.com'));
+    assert.ok(!isBlockedSite('binance.com')); assert.ok(!isBlockedSite('notchase.com'));
     // grants persist and can be revoked
     store.set('new.example', 'allow'); store.set('bad.example', 'deny');
     const reloaded = new PermissionStore({ dir });
     assert.equal(reloaded.get('new.example'), 'allow');
     pageURL = 'https://bad.example/';
-    assert.equal((await run('skip', 'computer', click, { store: reloaded })).action, 'block', 'denied sites block even in skip');
+    assert.equal((await run('skip', 'computer', click, { store: reloaded })).action, 'run', 'skip ignores saved denies');
     reloaded.revoke('bad.example'); assert.equal(new PermissionStore({ dir }).get('bad.example'), undefined);
     assert.equal(siteOf('http://localhost:3000/a'), 'localhost:3000'); assert.equal(siteOf('https://www.Example.com/'), 'example.com');
     assert.equal(parseVerdict('not json').decision, 'ask');
@@ -289,7 +306,8 @@ test('CDP attach uses only its own tabs and leaves the external browser running'
     assert.equal(session.pages().length, 1);
     assert.ok(!session.tabs().some(t => t.url === userPage.url() && t.url !== session.current().url()));
     assert.match(await getTool('read_page').run({ filter: 'interactive', max_chars: 20000 }, { browser: session }).then(r => r.text), /搜索产品/);
-    await assert.rejects(session.navigate(`http://localhost:${port}/api/state`), /工作台/);
+    await session.navigate(`http://localhost:${port}/api/state`);
+    assert.equal(session.current().url(), `http://localhost:${port}/api/state`);
     await session.close();
     assert.ok(external.isConnected(), 'external browser still running');
     assert.equal(userPage.isClosed(), false);
@@ -306,11 +324,15 @@ test('API blocks foreign origins, validates input and never returns a configured
   const changed = await post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/other`, model: 'test', apiKey: '' });
   assert.equal(changed.body.hasKey, false);
   await configureOpenAI();
-  assert.equal((await post('browser', { mode: 'cdp', cdpURL: 'http://example.com:9222', allowLocalhost: true, allowPrivateNetwork: false })).status, 400);
+  assert.equal((await post('browser', { mode: 'cdp', cdpURL: 'http://example.com:9222', allowLocalhost: true, allowPrivateNetwork: false })).status, 200);
   const browserCfg = await post('browser', { mode: 'ephemeral', cdpURL: '', allowLocalhost: false, allowPrivateNetwork: false });
   assert.equal(browserCfg.body.browser.allowLocalhost, false);
-  const blocked = await start({ startURL: 'http://localhost:3000' });
-  assert.equal(blocked.status, 400); assert.match(blocked.body.error, /localhost/);
+  const unrestricted = await start({ startURL: origin + '/demo', permissionMode: undefined });
+  assert.equal(unrestricted.status, 202);
+  await until(() => !agent.busy);
+  assert.equal(agent.task.permissionMode, 'skip');
+  assert.match(agent.task.result, /399/);
+  await settle();
   await post('browser', { mode: 'ephemeral', cdpURL: '', allowLocalhost: true, allowPrivateNetwork: false });
   const switched = await post('config', { provider: 'anthropic', model: 'claude-opus-5-5' });
   assert.equal(switched.body.hasKey, false, 'switching provider drops the key');
@@ -430,15 +452,24 @@ test('sessions are saved with tool cards and can be listed, replayed and deleted
   assert.ok(!after.body.sessions.some(s => s.id === id));
 });
 
-test('DeepSeek: reasoning_content is sent back during the tool loop and effort maps to reasoning_effort', async () => {
+test('DeepSeek: real image crops reach the API with original detail and reasoning_content preserved', async () => {
   const saved = await post('config', { provider: 'deepseek', baseURL: `http://127.0.0.1:${openaiPort}`, model: 'deepseek-flash', apiKey: 'ds-key', effort: 'max' });
   assert.equal(saved.body.provider, 'deepseek');
+  assert.equal(saved.body.vision, true);
   const defaults = await post('config', { provider: 'deepseek', model: 'deepseek-flash' });
   assert.equal(defaults.body.baseURL, 'https://api.deepseek.com', 'empty base URL uses the DeepSeek default');
   await post('config', { provider: 'deepseek', baseURL: `http://127.0.0.1:${openaiPort}`, model: 'deepseek-flash', apiKey: 'ds-key', effort: 'max' });
   mockMode = 'deepseek';
   await start({ permissionMode: 'skip' }); await until(() => !agent.busy);
   assert.equal(agent.task.status, 'done', agent.task.result); assert.match(agent.task.result, /399/);
+  const images = lastOpenAIBody.messages.filter(m => m.role === 'user').flatMap(m => Array.isArray(m.content) ? m.content : []).filter(p => p.type === 'image_url');
+  assert.equal(images.length, 1);
+  assert.equal(images[0].image_url.detail, 'original');
+  assert.match(images[0].image_url.url, /^data:image\/png;base64,/);
+  const png = Buffer.from(images[0].image_url.url.split(',')[1], 'base64');
+  assert.equal(png.subarray(1, 4).toString(), 'PNG');
+  assert.equal(png.readUInt32BE(16), 160); assert.equal(png.readUInt32BE(20), 80);
+  assert.ok(lastOpenAIBody.messages.filter(m => m.role !== 'user').every(m => !Array.isArray(m.content)), 'images only occur in user messages');
   assert.equal(lastOpenAIBody.model, 'deepseek-flash'); assert.equal(lastOpenAIBody.reasoning_effort, 'max');
   assert.equal(requestAuth, 'Bearer ds-key');
   assert.ok(lastOpenAIBody.messages.filter(m => m.role === 'assistant').every(m => m.reasoning_content));
@@ -502,6 +533,7 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   await mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: 'artifacts/workbench.png', fullPage: true });
   const beforeRequests = requests;
+  assert.equal(await page.locator('#permission-mode').inputValue(), 'skip');
   await page.locator('#demo').click();
   await until(() => agent.task?.mode === 'demo' && !agent.busy);
   await page.waitForFunction(() => document.getElementById('result').textContent.includes('演示完成'));
@@ -515,7 +547,8 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   await page.selectOption('#provider', 'deepseek');
   assert.equal(await page.locator('#base-url').inputValue(), 'https://api.deepseek.com');
   assert.equal(await page.locator('#model').inputValue(), 'deepseek-flash');
-  assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), false);
+  assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), true);
+  assert.equal(await page.locator('#vision').isChecked(), true);
   await page.selectOption('#provider', 'anthropic');
   assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), false);
   assert.ok(await page.locator('.tool-card').count() >= 3, 'tool calls render as cards');
@@ -523,7 +556,7 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   await page.selectOption('#permission-mode', 'auto');
   assert.match(await page.locator('#mode-hint').textContent(), /审查/);
   await page.locator('[data-tab="browser-settings"]').click();
-  assert.match(await page.locator('#blocked-sites').inputValue(), /paypal\.com/);
+  assert.equal(await page.locator('#blocked-sites').inputValue(), '');
   await page.selectOption('#browser-mode', 'cdp');
   assert.equal(await page.locator('#cdp-url').isVisible(), true); assert.equal(await page.locator('#login-open').isVisible(), false);
   await page.selectOption('#browser-mode', 'persistent');

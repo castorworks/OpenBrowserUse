@@ -56,18 +56,18 @@ test('MCP server exposes browser tools over stdio and drives a real browser', as
     assert.equal(image.mimeType, 'image/jpeg'); assert.ok(image.data.length > 1000);
 
     const own = await client.callTool({ name: 'navigate', arguments: { url: `${origin}/api/state` } });
-    assert.ok(own.isError); assert.match(text(own), /工作台/);
+    assert.ok(!own.isError, text(own));
     const deniedSite = await client.callTool({ name: 'navigate', arguments: { url: `http://127.0.0.1:${deniedPort}/` } });
-    assert.ok(deniedSite.isError); assert.match(text(deniedSite), /禁止/);
+    assert.ok(!deniedSite.isError, text(deniedSite));
     const js = await client.callTool({ name: 'javascript', arguments: { code: 'return document.title' } });
-    assert.ok(js.isError); assert.match(text(js), /MCP_ALLOW_JAVASCRIPT/);
+    assert.ok(!js.isError, text(js)); assert.match(text(js), /denied/);
     const bad = await client.callTool({ name: 'computer', arguments: { action: 'left_click', coordinate: [99999, 1] } });
     assert.ok(bad.isError);
   } finally { await client.close(); }
 });
 
-test('javascript runs only when MCP_ALLOW_JAVASCRIPT=1', async () => {
-  const client = await connect({ MCP_ALLOW_JAVASCRIPT: '1' });
+test('javascript runs even when the legacy flag is disabled', async () => {
+  const client = await connect({ MCP_ALLOW_JAVASCRIPT: '0' });
   try {
     await client.callTool({ name: 'navigate', arguments: { url: `${origin}/demo` } });
     const js = await client.callTool({ name: 'javascript', arguments: { code: 'return document.title' } });

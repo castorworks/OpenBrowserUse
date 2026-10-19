@@ -9,13 +9,13 @@ async function api(path, data) {
 }
 const providerHints = {
   anthropic: { base: '留空使用 Anthropic 官方地址', hint: '（可选）', model: '例如 claude-opus-5-5' },
-  deepseek: { base: 'https://api.deepseek.com', hint: '（默认官方地址）', model: '例如 deepseek-flash 或 deepseek-v4-pro' },
+  deepseek: { base: 'https://api.deepseek.com', hint: '（默认官方地址）', model: '图像识别使用 deepseek-flash' },
   openai: { base: 'https://api.openai.com/v1', hint: '（含 /v1，不含 /chat/completions）', model: '服务商提供的模型 ID' },
 };
 function syncProvider() {
   const provider = $('provider').value, h = providerHints[provider];
   document.querySelectorAll('.provider-effort').forEach(el => el.hidden = provider === 'openai');
-  document.querySelectorAll('.provider-openai').forEach(el => el.hidden = provider !== 'openai');
+  document.querySelectorAll('.provider-openai').forEach(el => el.hidden = provider === 'anthropic');
   $('base-url').placeholder = h.base; $('base-url-hint').textContent = h.hint; $('model').placeholder = h.model;
 }
 const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', cdp: '连接 Chrome' };
@@ -48,7 +48,7 @@ function pendingText(p) {
 const modeHints = {
   ask: '每次点击、输入前都请你确认；首次访问新网站时也会询问。',
   auto: '规则和审查模型判断风险：安全的操作直接执行，购买、发送、删除等有后果的操作会请你确认。',
-  skip: '不再确认（脚本和受保护网站除外）。只用于你完全信任的任务。',
+  skip: '直接执行所有浏览器工具；不进行网站、字段或脚本权限拦截。',
 };
 let lastGrants = '';
 function renderGrants(list) {
@@ -205,13 +205,14 @@ $('model-chip').onclick = () => openDrawer('settings');
 function handle(id, fn) { $(id).addEventListener('click', async () => { $(id).disabled = true; try { await fn(); render(await api('state')); } catch (e) { toast(e.message); } finally { $(id).disabled = false; if (current) render(current); } }); }
 $('provider').addEventListener('change', () => {
   syncProvider();
+  $('vision').checked = $('provider').value === 'deepseek';
   // Switching service fills in that service's default address and model.
   const defaults = current?.config.defaults;
   if (defaults) { $('base-url').value = defaults.baseURL[$('provider').value] || ''; $('model').value = defaults.model[$('provider').value] || ''; }
 });
 handle('save-config', async () => {
   const config = await api('config', { provider: $('provider').value, baseURL: $('base-url').value.trim(), model: $('model').value.trim(), apiKey: $('api-key').value.trim(), clearKey: $('clear-key').checked, effort: $('effort').value, vision: $('vision').checked, reviewerModel: $('reviewer-model').value.trim() });
-  $('api-key').value = ''; $('clear-key').checked = false; showConfig(config); toast('配置已保存到本地服务内存。');
+  $('api-key').value = ''; $('clear-key').checked = false; showConfig(config); toast('配置已保存到本机，重启后自动恢复。');
 });
 $('browser-mode').addEventListener('change', syncBrowserMode);
 async function saveBrowser(message) {
@@ -235,6 +236,7 @@ for (const command of ['pause', 'resume', 'stop', 'approve', 'reject']) handle(c
 handle('close-session', () => api('control', { command: 'stop' }));
 handle('approve-site', () => api('control', { command: 'approve_site' }));
 handle('deny-site', () => api('control', { command: 'deny_site' }));
+$('mode-hint').textContent = modeHints[$('permission-mode').value];
 $('permission-mode').addEventListener('change', () => { $('mode-hint').textContent = modeHints[$('permission-mode').value]; });
 handle('answer', async () => { await api('control', { command: 'resume', answer: $('user-answer').value }); $('user-answer').value = ''; });
 handle('send', async () => { await api('messages', { text: $('follow-up').value }); $('follow-up').value = ''; });
