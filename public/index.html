@@ -38,6 +38,7 @@
           <button class="secondary" id="save-browser">保存浏览器设置</button>
           <label>网站权限</label><div id="site-grants"><p class="hint">还没有保存的网站权限。</p></div>
         </div></details>
+        <details class="card settings" id="history"><summary><span>历史会话</span><span id="history-count"></span></summary><div class="settings-content"><div id="history-list"><p class="hint">还没有保存的会话。</p></div></div></details>
       </div>
       <div class="right-column">
         <section class="card viewer"><div class="section-head"><h2><span class="live-dot"></span>浏览器视图</h2><span id="status" class="status">就绪</span></div><div class="address-bar"><span class="traffic"><i></i><i></i><i></i></span><span id="page-url">等待新任务</span><span>↗</span></div>
@@ -45,7 +46,11 @@
           <div class="viewer-footer"><span id="step-count">等待观察页面</span><div class="controls"><button id="pause" disabled>暂停 / 接管</button><button id="resume" hidden>继续执行</button><button id="stop" disabled>停止</button></div></div>
         </section>
         <section class="card decision" id="decision" hidden><h2 id="decision-title">确认下一步</h2><pre id="decision-detail"></pre><textarea id="user-answer" placeholder="补充要求，或说明已在浏览器中完成的操作" rows="2" hidden></textarea><div class="decision-buttons"><button class="primary" id="approve">允许这一步</button><button class="secondary" id="approve-site" hidden>始终允许此网站</button><button class="secondary" id="reject">拒绝</button><button class="secondary" id="deny-site" hidden>禁止此网站</button><button class="primary" id="answer" hidden>发送并继续</button></div></section>
-        <section class="card activity"><div class="section-head"><h2>执行记录</h2><button class="text-button" id="export" disabled>导出记录 ↓</button></div><div id="events" aria-live="polite"><p class="empty-log">每一步动作和执行结果会显示在这里。</p></div><div id="result-box" hidden><span class="eyebrow">RESULT</span><pre id="result"></pre></div><div id="follow-up-box" hidden><label for="follow-up">继续对话</label><textarea id="follow-up" rows="2" placeholder="在同一个浏览器里继续，例如：再打开第一个结果并总结"></textarea><div class="decision-buttons"><button class="primary" id="send">发送</button><button class="secondary" id="close-session">关闭浏览器</button></div></div></section>
+        <section class="card activity"><div class="section-head"><h2>对话</h2><button class="text-button" id="export" disabled>导出记录 ↓</button></div>
+          <div id="replay-banner" hidden><span id="replay-title"></span><button class="text-button" id="replay-exit">返回当前任务</button></div>
+          <div id="events" aria-live="polite"><p class="empty-log">你的目标、代理的说明和每次工具调用会显示在这里。</p></div>
+          <div id="result-box" hidden><span class="eyebrow">RESULT</span><pre id="result"></pre></div>
+          <div id="follow-up-box" hidden><label for="follow-up" id="chat-label">继续对话</label><textarea id="follow-up" rows="2" placeholder="在同一个浏览器里继续，例如：再打开第一个结果并总结"></textarea><div class="decision-buttons"><button class="primary" id="send">发送</button><button class="secondary" id="close-session">关闭浏览器</button></div></div></section>
       </div>
     </div>
     <footer>由你设定目标，由你掌握控制权。<span>本地运行 · 独立会话 · 可随时停止</span></footer>

@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let current = null, configured = false, lastImage = null, lastEventKey = '', lastTask = null;
+let current = null, configured = false, lastImage = null, lastEventKey = '', lastTask = null, lastFrameAt = 0, replay = null, lastStatus = '';
 const states = { starting: '启动浏览器', running: '执行中', pausing: '正在暂停', paused: '已暂停 · 可接管', approval: '等待确认', waiting_user: '需要你的帮助', stopping: '正在停止', stopped: '已停止', done: '已完成 · 可继续', failed: '执行失败' };
 const providerLabel = { anthropic: 'Claude', openai: 'OpenAI 兼容', demo: '固定脚本演示' };
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').hidden = true, 6500); }
@@ -61,6 +61,39 @@ function renderGrants(list) {
     row.append(name, tag, revoke); return row;
   }));
 }
+const toolIcons = { read_page: '☰', find: '⌕', get_page_text: '¶', computer: '⌖', navigate: '↗', tabs: '▭', form_input: '✎', javascript: '{}', read_console_messages: '>_', read_network_requests: '⇅' };
+function el(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text != null) node.textContent = text; return node; }
+// Chat transcript: user and agent messages as bubbles, each tool call as a collapsible card.
+function renderEvents(events) {
+  const key = JSON.stringify(events);
+  if (key === lastEventKey) return;
+  lastEventKey = key;
+  const box = $('events');
+  const nearEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 45;
+  if (!events.length) { box.replaceChildren(el('p', 'empty-log', '你的目标、代理的说明和每次工具调用会显示在这里。')); return; }
+  box.replaceChildren(...events.map(e => {
+    const time = new Date(e.time).toLocaleTimeString('zh-CN', { hour12: false });
+    if (e.kind === 'user' || e.kind === 'assistant') {
+      const bubble = el('div', `bubble ${e.kind}`); bubble.append(el('p', '', e.message), el('time', '', time)); return bubble;
+    }
+    if (e.kind === 'action') {
+      const card = el('details', `tool-card ${e.state || ''}`);
+      const summary = el('summary');
+      summary.append(el('span', 'tool-icon', toolIcons[e.tool] || '•'), el('span', 'tool-summary', e.message), el('span', 'tool-state', e.state === 'running' ? '…' : e.state === 'error' ? '✗' : '✓'), el('time', '', time));
+      card.append(summary);
+      if (e.input) card.append(el('pre', 'tool-io', `输入 ${e.input}`));
+      if (e.output) card.append(el('pre', 'tool-io', `${e.image ? '[截图] ' : ''}结果 ${e.output}`));
+      return card;
+    }
+    const line = el('div', `event ${e.kind}`); line.append(el('time', '', time), el('span', '', e.message)); return line;
+  }));
+  if (nearEnd) box.scrollTop = box.scrollHeight;
+}
+function showFrame(data) {
+  lastFrameAt = Date.now();
+  $('screenshot').src = `data:image/jpeg;base64,${data}`; lastImage = 'frame';
+  $('screenshot').hidden = false; $('empty-state').hidden = true;
+}
 function render(state) {
   renderGrants(state.permissions || []);
   current = state;
@@ -73,24 +106,27 @@ function render(state) {
   $('pause').disabled = !t || !['running', 'starting'].includes(t.status);
   $('stop').disabled = !(busy || t?.sessionOpen) || t?.status === 'stopping';
   $('resume').hidden = t?.status !== 'paused'; $('pause').hidden = t?.status === 'paused';
-  $('export').disabled = !t;
+  $('export').disabled = !t && !replay;
   if (!t) return;
   if (lastTask !== t.id) { lastImage = null; lastEventKey = ''; lastTask = t.id; }
   $('status').textContent = t.mode === 'demo' ? `演示 · ${t.status === 'done' ? '已完成' : states[t.status] || t.status}` : states[t.status] || t.status; $('status').classList.toggle('error', t.status === 'failed');
-  $('step-count').textContent = `动作 ${t.step} / ${t.maxSteps} · ${providerLabel[t.provider] || t.provider} · 截图随步骤更新`;
+  const live = Date.now() - lastFrameAt < 3000 && t.sessionOpen;
+  $('step-count').textContent = `动作 ${t.step} / ${t.maxSteps} · ${providerLabel[t.provider] || t.provider} · ${live ? '实时画面' : '截图随步骤更新'}`;
   $('page-url').textContent = t.snapshot?.url || '正在打开浏览器…';
   const screenshot = t.snapshot?.screenshot;
-  if (screenshot !== lastImage) { if (screenshot) $('screenshot').src = screenshot; else $('screenshot').removeAttribute('src'); lastImage = screenshot; }
-  $('screenshot').hidden = !screenshot; $('empty-state').hidden = Boolean(screenshot);
-  const eventKey = `${t.events.length}:${t.events.at(-1)?.time}`;
-  if (lastEventKey !== eventKey) {
-    const nearEnd = $('events').scrollTop + $('events').clientHeight >= $('events').scrollHeight - 45;
-    $('events').replaceChildren(...t.events.map(e => { const div = document.createElement('div'); div.className = `event ${e.kind}`; const time = document.createElement('time'); time.textContent = new Date(e.time).toLocaleTimeString('zh-CN', { hour12: false }); const text = document.createElement('span'); text.textContent = e.message; div.append(time, text); return div; }));
-    if (nearEnd) $('events').scrollTop = $('events').scrollHeight;
-    lastEventKey = eventKey;
+  if (!live && screenshot !== lastImage) { if (screenshot) $('screenshot').src = screenshot; else $('screenshot').removeAttribute('src'); lastImage = screenshot; }
+  if (!live) { $('screenshot').hidden = !screenshot; $('empty-state').hidden = Boolean(screenshot); }
+  if (t.status !== lastStatus) { if (['done', 'failed', 'stopped'].includes(t.status) && $('history').open) void loadHistory(); lastStatus = t.status; }
+  if (!replay) {
+    renderEvents(t.events);
+    $('result-box').hidden = !t.result; $('result').textContent = t.result;
   }
-  $('result-box').hidden = !t.result; $('result').textContent = t.result;
-  $('follow-up-box').hidden = !(t.sessionOpen && !busy && ['done', 'failed'].includes(t.status) && t.mode !== 'demo');
+  // One chat box: steers a running task, continues an idle session.
+  const canChat = !replay && t.sessionOpen && t.mode !== 'demo' && !['stopping', 'pausing', 'starting'].includes(t.status);
+  $('follow-up-box').hidden = !canChat;
+  $('chat-label').textContent = busy ? '补充说明（下一步生效）' : '继续对话';
+  $('send').textContent = busy ? '发送补充' : '发送';
+  $('close-session').hidden = busy;
   const approval = t.status === 'approval', question = t.status === 'waiting_user';
   $('decision').hidden = !(approval || question);
   $('decision-title').textContent = question ? '需要你的帮助' : '确认下一步';
@@ -100,7 +136,41 @@ function render(state) {
   $('approve-site').hidden = !(site && t.pending.needsSite); $('approve-site').textContent = site ? `始终允许 ${site}` : '';
   $('deny-site').hidden = !site; $('deny-site').textContent = site ? `禁止 ${site}` : '';
 }
-async function poll() { try { render(await api('state')); } catch { $('connection').textContent = '服务连接中断'; $('connection-dot').classList.add('offline'); } finally { setTimeout(poll, 1000); } }
+function offline() { $('connection').textContent = '服务连接中断'; $('connection-dot').classList.add('offline'); }
+async function poll() { try { render(await api('state')); } catch { offline(); } finally { if (!window.EventSource) setTimeout(poll, 1000); } }
+// Live updates over server-sent events; the browser reconnects on its own after errors.
+function connect() {
+  if (!window.EventSource) return poll();
+  const source = new EventSource('/api/events');
+  source.addEventListener('state', e => render(JSON.parse(e.data)));
+  source.addEventListener('frame', e => { if (current?.task?.sessionOpen) showFrame(e.data); });
+  source.onerror = offline;
+}
+async function loadHistory() {
+  try {
+    const { sessions } = await api('sessions');
+    $('history-count').textContent = sessions.length ? `${sessions.length} 个` : '';
+    if (!sessions.length) { $('history-list').replaceChildren(el('p', 'hint', '还没有保存的会话。')); return; }
+    $('history-list').replaceChildren(...sessions.map(s => {
+      const row = el('div', 'grant');
+      const open = el('button', 'text-button history-open', s.goal.slice(0, 60)); open.title = s.goal;
+      open.onclick = () => openReplay(s.id);
+      row.append(open, el('em', s.status === 'failed' ? 'deny' : '', `${states[s.status] || s.status} · ${new Date(s.updated).toLocaleString('zh-CN', { hour12: false })}`));
+      return row;
+    }));
+  } catch (e) { toast(e.message); }
+}
+async function openReplay(id) {
+  try {
+    replay = await api(`sessions/${id}`);
+    $('replay-banner').hidden = false; $('replay-title').textContent = `回放：${replay.goal.slice(0, 80)}`;
+    lastEventKey = ''; renderEvents(replay.events);
+    $('result-box').hidden = !replay.result; $('result').textContent = replay.result;
+    if (current) render(current);
+  } catch (e) { toast(e.message); }
+}
+$('replay-exit').onclick = () => { replay = null; $('replay-banner').hidden = true; lastEventKey = ''; if (current) render(current); };
+$('history').addEventListener('toggle', () => { if ($('history').open) void loadHistory(); });
 function handle(id, fn) { $(id).addEventListener('click', async () => { $(id).disabled = true; try { await fn(); render(await api('state')); } catch (e) { toast(e.message); } finally { $(id).disabled = false; if (current) render(current); } }); }
 $('provider').addEventListener('change', () => {
   syncProvider();
@@ -134,5 +204,5 @@ handle('answer', async () => { await api('control', { command: 'resume', answer:
 handle('send', async () => { await api('messages', { text: $('follow-up').value }); $('follow-up').value = ''; });
 $('settings-shortcut').onclick = () => { $('settings').open = true; $('settings').scrollIntoView({ behavior: 'smooth', block: 'center' }); };
 document.querySelectorAll('[data-goal]').forEach(button => button.onclick = () => { $('goal').value = button.dataset.goal; $('start-url').value = button.dataset.url; });
-$('export').onclick = () => { const t = current?.task; if (!t) return; const data = { ...t, snapshot: t.snapshot ? { ...t.snapshot, screenshot: undefined } : null }; const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `browser-use-${t.id}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
-poll();
+$('export').onclick = () => { const t = replay || current?.task; if (!t) return; const data = { ...t, snapshot: t.snapshot ? { ...t.snapshot, screenshot: undefined } : null }; const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `browser-use-${t.id}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+connect();

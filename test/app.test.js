@@ -372,6 +372,59 @@ test('site approval: always-allow persists, revoke clears it, deny blocks later 
   mockMode = 'normal'; await settle();
 });
 
+// Reads server-sent events until `want` returns true for the collected events (or times out).
+async function readEvents(want, timeout = 20000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  const res = await fetch(origin + '/api/events', { signal: controller.signal });
+  const reader = res.body.getReader(); const decoder = new TextDecoder();
+  const events = []; let buffer = '';
+  try {
+    while (!want(events)) {
+      const { value, done } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let i;
+      while ((i = buffer.indexOf('\n\n')) >= 0) {
+        const chunk = buffer.slice(0, i); buffer = buffer.slice(i + 2);
+        const type = /^event: (.+)$/m.exec(chunk)?.[1]; const data = /^data: (.*)$/m.exec(chunk)?.[1];
+        if (type) events.push({ type, data });
+      }
+    }
+  } finally { clearTimeout(timer); controller.abort(); }
+  return events;
+}
+
+test('live updates: SSE pushes state changes and screencast frames; messages steer a running task', async () => {
+  mockMode = 'slow'; await configureOpenAI();
+  const streamed = readEvents(events => events.some(e => e.type === 'frame') && events.some(e => e.type === 'state' && JSON.parse(e.data).task?.events.some(x => x.kind === 'user' && x.message === '顺便看看价格')));
+  await start();
+  await until(() => agent.task?.status === 'running' && agent.browser);
+  assert.equal((await post('messages', { text: '顺便看看价格' })).status, 202);
+  const events = await streamed;
+  const frame = events.find(e => e.type === 'frame').data;
+  assert.ok(Buffer.from(frame, 'base64').subarray(0, 2).equals(Buffer.from([0xff, 0xd8])), 'frame is a JPEG');
+  await until(() => agent.task.status === 'approval');
+  assert.ok(JSON.stringify(lastOpenAIBody.messages).includes('[用户在执行过程中补充] 顺便看看价格'), 'steering message reaches the model');
+  await settle(); mockMode = 'normal';
+});
+
+test('sessions are saved with tool cards and can be listed, replayed and deleted', async () => {
+  mockMode = 'normal'; await configureOpenAI();
+  await start({ permissionMode: 'skip' }); await until(() => !agent.busy);
+  const id = agent.task.id;
+  await settle();
+  const { sessions } = await (await fetch(origin + '/api/sessions')).json();
+  assert.equal(sessions[0].id, id); assert.equal(sessions[0].status, 'stopped');
+  const saved = await (await fetch(`${origin}/api/sessions/${id}`)).json();
+  const card = saved.events.find(e => e.kind === 'action' && e.tool === 'get_page_text');
+  assert.equal(card.state, 'ok'); assert.match(card.output, /搜索结果：键盘/);
+  assert.match(saved.result, /399/);
+  assert.equal(saved.snapshot.screenshot, undefined, 'screenshots are not stored');
+  assert.equal((await fetch(`${origin}/api/sessions/00000000-0000-4000-8000-000000000000`)).status, 404);
+  const after = await post('sessions/delete', { id });
+  assert.ok(!after.body.sessions.some(s => s.id === id));
+});
+
 test('pause cancels pending model response, resume continues, stop ends approval wait', async () => {
   mockMode = 'slow'; const beforeRequests = requests; await start();
   await until(() => requests > beforeRequests);
@@ -439,6 +492,8 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   await page.locator('#settings').evaluate(el => { el.open = true; });
   await page.selectOption('#provider', 'anthropic');
   assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), false);
+  assert.ok(await page.locator('.tool-card').count() >= 3, 'tool calls render as cards');
+  assert.ok(await page.locator('.bubble.user').count() >= 1);
   await page.selectOption('#permission-mode', 'auto');
   assert.match(await page.locator('#mode-hint').textContent(), /审查/);
   await page.locator('#browser-settings').evaluate(el => { el.open = true; });
@@ -449,7 +504,7 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   assert.equal(await page.locator('#login-open').isVisible(), true);
   await page.screenshot({ path: 'artifacts/browser-settings.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), await page.evaluate(() => [...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right > innerWidth + 1).slice(0, 6).map(e => `${e.tagName}.${e.className}#${e.id} ${Math.round(e.getBoundingClientRect().right)}`).join(' | ')));
   await page.screenshot({ path: 'artifacts/mobile.png', fullPage: true });
   assert.deepEqual(errors, []); await page.close();
 });
