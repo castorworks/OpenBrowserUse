@@ -136,9 +136,9 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     agent.permissions.revoke(site); res.json({ permissions: agent.permissions.list() });
   });
   app.post('/api/tasks', async (req, res) => {
-    const input = z.object({ goal: z.string().trim().min(1).max(8000), startURL: z.string().max(4000).default('https://example.com'), maxSteps: z.number().int().min(1).max(200).default(50), permissionMode: z.enum(MODES).default('skip'), demo: z.boolean().default(false) }).parse(req.body);
+    const input = z.object({ goal: z.string().trim().min(1).max(8000), startURL: z.string().trim().max(4000).optional(), maxSteps: z.number().int().min(1).max(200).default(50), permissionMode: z.enum(MODES).default('skip'), demo: z.boolean().default(false) }).parse(req.body);
     if (agent.busy) return res.status(409).json({ error: '已有任务正在执行。' });
-    if (!input.demo) { if (!config.model) throw new Error('请先在模型设置中填写模型名。'); allowedURL(input.startURL, origin, config.browser); }
+    if (!input.demo) { if (!config.model) throw new Error('请先在模型设置中填写模型名。'); if (input.startURL) allowedURL(input.startURL, origin, config.browser); }
     await agent.start(input, config); res.status(202).json({ ok: true });
   });
   app.post('/api/messages', (req, res) => {

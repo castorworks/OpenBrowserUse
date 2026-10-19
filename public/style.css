@@ -236,7 +236,6 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .field-inline input, .field-inline select { height: 32px; padding: 0 4px; border: 0; background-color: transparent; box-shadow: none; font-size: 13px; color: var(--text); }
 .field-inline select { padding-right: 22px; background-position: calc(100% - 11px) 50%, calc(100% - 6px) 50%; }
 .field-inline:focus-within { border-color: var(--accent); }
-.url-field { flex: 1 1 100%; min-width: 0; }
 .steps input { width: 46px; text-align: center; }
 #run { margin-left: auto; }
 

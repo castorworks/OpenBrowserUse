@@ -290,13 +290,13 @@ async function saveBrowser(message) {
 handle('save-browser', () => saveBrowser('浏览器设置已保存。'));
 $('copy-token').onclick = async () => { try { await navigator.clipboard.writeText($('extension-token').value); toast('配对令牌已复制。'); } catch { $('extension-token').select(); } };
 handle('save-blocked', () => saveBrowser('受保护网站已保存。'));
-handle('login-open', () => api('login', { action: 'open', url: $('start-url').value.trim() || undefined }));
+handle('login-open', () => api('login', { action: 'open' }));
 handle('login-close', () => api('login', { action: 'close' }));
 async function start(demo) {
   if (!demo && !current?.config.model) { openDrawer('settings'); $('model').focus(); throw new Error('先填写模型设置并保存，再开始 AI 任务。'); }
   const goal = demo ? '在演示商店搜索键盘，并读取搜索结果。' : $('goal').value.trim();
   if (!goal) { $('goal').focus(); throw new Error('请先描述任务目标。'); }
-  await api('tasks', { goal, startURL: $('start-url').value.trim(), maxSteps: Number($('max-steps').value), permissionMode: $('permission-mode').value, demo });
+  await api('tasks', { goal, maxSteps: Number($('max-steps').value), permissionMode: $('permission-mode').value, demo });
   composeNew = false; if (replay) exitReplay();
   if (!demo) $('goal').value = '';
 }
@@ -309,7 +309,7 @@ $('mode-hint').textContent = modeHints[$('permission-mode').value];
 $('permission-mode').addEventListener('change', () => { $('mode-hint').textContent = modeHints[$('permission-mode').value]; });
 handle('answer', async () => { await api('control', { command: 'resume', answer: $('user-answer').value }); $('user-answer').value = ''; });
 handle('send', async () => { await api('messages', { text: $('follow-up').value }); $('follow-up').value = ''; });
-document.querySelectorAll('[data-goal]').forEach(button => button.onclick = () => { $('goal').value = button.dataset.goal; $('start-url').value = button.dataset.url; $('goal').focus(); });
+document.querySelectorAll('[data-goal]').forEach(button => button.onclick = () => { $('goal').value = button.dataset.goal; $('goal').focus(); });
 // Enter sends from either composer; Shift+Enter adds a line.
 for (const [input, button] of [['goal', 'run'], ['follow-up', 'send']]) $(input).addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $(button).click(); } });
 $('export').onclick = async () => { try { const t = replay || (await api('state')).task; if (!t) return; const data = { ...t, snapshot: t.snapshot ? { ...t.snapshot, screenshot: undefined } : null }; const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `open-browser-use-${t.id}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); } catch (e) { toast(e.message); } };

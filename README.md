@@ -19,7 +19,7 @@ npm start
 - **DeepSeek**：Base URL 留空即 `https://api.deepseek.com`，模型默认 `deepseek-flash`（也可用 `deepseek-v4-pro`），填写 DeepSeek 的 API Key（或设置 `DEEPSEEK_API_KEY`）。DeepSeek 默认开启思考模式：工具调用期间会把 `reasoning_content` 原样回传（否则接口返回 400），思考内容显示在对话中；“思考强度”映射为 `reasoning_effort`（low → low，medium / high / xhigh → high，max → max）。DeepSeek 默认开启截图输入，图像识别请选择 `deepseek-flash`；按[官方视觉接口](https://api-docs.deepseek.com/zh-cn/guides/vision/)将截图以 user 消息中的 base64 `image_url` 发送，使用 `detail: original`。`computer screenshot` 查看全图，`computer zoom` 提供无损 PNG 局部截图，可用于小字、验证码等图片识别。设置中可关闭“发送截图”；自动模式的审查使用同一模型。
 - **OpenAI 兼容服务**：Base URL 如 `https://api.openai.com/v1`（不要附加 `/chat/completions`），填写模型 ID 和 Key。模型必须支持 tools / function calling。“发送截图”仅在模型支持视觉时开启。
 
-保存配置，输入目标和起始网页，选择权限模式，点击“开始执行”。
+保存配置，输入目标（需要打开的网址直接写在目标里），选择权限模式，点击“开始执行”。
 
 模型配置和 API Key 保存到 `~/.openbrowseruse/model-config.json`（可用 `OBU_DATA_DIR` 指定目录），服务重启后自动恢复。Key 以明文保存在本机文件，API 响应不会返回 Key。保存时 Key 留空会保留同一服务的已有 Key；勾选“清除已保存的 Key”后保存会同步清除磁盘中的 Key。切换服务商或 Base URL 会清除旧 Key。已保存的模型配置优先于启动环境变量；没有配置文件时使用环境变量初始化。
 
@@ -43,7 +43,7 @@ npm start
 
 可选确认模式及操作记录：
 
-- **网站权限**：除跳过确认模式外，首次访问或首次操作一个新网站（起始网页除外）时会询问，可选“允许这一步 / 始终允许此网站 / 禁止此网站”。“始终允许”和“禁止”保存在 `~/.openbrowseruse/permissions.json`（可用 `OBU_DATA_DIR` 修改），在“浏览器设置 → 网站权限”中撤销。
+- **网站权限**：除跳过确认模式外，首次访问或首次操作一个新网站（目标里写明的网址除外）时会询问，可选“允许这一步 / 始终允许此网站 / 禁止此网站”。“始终允许”和“禁止”保存在 `~/.openbrowseruse/permissions.json`（可用 `OBU_DATA_DIR` 修改），在“浏览器设置 → 网站权限”中撤销。
 - 默认受保护网站列表为空。用户自行配置的受保护网站仅在可选确认模式下生效。密码、验证码、文件上传和支付字段不再要求人工接管。
 - `javascript` 与其他工具一样，默认直接执行。
 - 每个被执行、拒绝或阻止的操作都记入任务的 `audit` 列表（时间、网站、工具、决定来源），随“导出记录”一起导出。

@@ -402,6 +402,17 @@ test('site approval: always-allow persists, revoke clears it, deny blocks later 
   mockMode = 'normal'; await settle();
 });
 
+test('without a start page the task opens a blank tab; a site named in the goal needs no site approval', async () => {
+  mockMode = 'nav'; await configureOpenAI();
+  const { status } = await post('tasks', { goal: `打开 http://127.0.0.1:${sitePort}/，告诉我页面标题。`, maxSteps: 5, permissionMode: 'ask' });
+  assert.equal(status, 202);
+  await until(() => !agent.busy);
+  assert.equal(agent.task.status, 'done', agent.task.result);
+  assert.ok(JSON.stringify(lastOpenAIBody.messages).includes('空白标签页'), 'the model is told it starts on a blank tab');
+  assert.equal(agent.task.events.filter(e => e.kind === 'approval').length, 0, 'the site the user typed is allowed');
+  assert.match(agent.task.result, /Other site/);
+});
+
 // Reads server-sent events until `want` returns true for the collected events (or times out).
 async function readEvents(want, timeout = 20000) {
   const controller = new AbortController();

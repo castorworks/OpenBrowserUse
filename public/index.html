@@ -42,8 +42,8 @@
         <h2>把目标交给浏览器</h2>
         <p>描述你想完成的事。代理会读取页面、点击和输入，每一步都显示在这里，你可以随时确认、补充或接管。</p>
         <div class="examples">
-          <button class="example" data-goal="阅读这个网页，总结它的主要内容，并附上来源链接。" data-url="https://example.com"><strong>网页总结</strong><span>阅读页面并整理要点</span></button>
-          <button class="example" data-goal="访问 Playwright 官网，查找支持哪些浏览器，并用中文总结，附上来源。" data-url="https://playwright.dev"><strong>文档检索</strong><span>在文档站查找并汇总信息</span></button>
+          <button class="example" data-goal="打开 https://example.com，总结它的主要内容，并附上来源链接。"><strong>网页总结</strong><span>阅读页面并整理要点</span></button>
+          <button class="example" data-goal="打开 https://playwright.dev，查找支持哪些浏览器，并用中文总结，附上来源。"><strong>文档检索</strong><span>在文档站查找并汇总信息</span></button>
           <button class="example demo" id="demo"><strong>本地演示</strong><span>无需 API Key · 固定脚本</span></button>
         </div>
       </section>
@@ -66,9 +66,8 @@
 
     <div class="composer" id="task-composer">
       <label class="sr-only" for="goal">你希望完成什么？</label>
-      <textarea id="goal" rows="2" placeholder="描述目标，例如：打开 Playwright 官网，找到浏览器支持列表，并用中文整理结果。"></textarea>
+      <textarea id="goal" rows="2" placeholder="描述目标，例如：打开 https://playwright.dev，找到浏览器支持列表，并用中文整理结果。"></textarea>
       <div class="composer-row">
-        <label class="field-inline url-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c2.5 2.2 2.5 11.8 0 14M10 3c-2.5 2.2-2.5 11.8 0 14"/></svg><span class="sr-only">起始网页</span><input id="start-url" type="url" value="https://example.com" placeholder="起始网页 https://…"></label>
         <label class="field-inline" title="权限模式"><span class="sr-only">权限</span><select id="permission-mode"><option value="ask">逐步确认</option><option value="auto">自动 · 审查风险</option><option value="skip" selected>直接执行 · 无限制</option></select></label>
         <label class="field-inline steps" title="最多步数">最多<input id="max-steps" type="number" min="1" max="200" value="50">步</label>
         <button class="btn btn-primary" id="run">开始执行<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10h10m0 0l-4-4m4 4l-4 4"/></svg></button>
