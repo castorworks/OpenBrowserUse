@@ -55,6 +55,29 @@ npm start
 
 地址限制：“允许访问 localhost”默认开启，可让代理检查本机开发服务器；“允许访问内网地址”默认关闭。工作台自身的端口始终禁止访问（内置演示页除外）。
 
+## 给 Claude Code / Codex 使用（MCP）
+
+`bin/mcp.js` 是一个 stdio MCP 服务器，把同一套浏览器工具（read_page、find、get_page_text、computer、navigate、tabs、form_input、控制台/网络、javascript）提供给编程代理，例如让 Claude Code 检查本机开发服务器。不需要启动工作台，也不使用模型 Key：决策由调用它的代理完成。
+
+Claude Code：
+
+```bash
+claude mcp add --transport stdio openbrowseruse --env BROWSER_MODE=persistent -- node /path/to/OpenBrowserUse/bin/mcp.js
+```
+
+Codex（`~/.codex/config.toml`）：
+
+```toml
+[mcp_servers.openbrowseruse]
+command = "node"
+args = ["/path/to/OpenBrowserUse/bin/mcp.js"]
+env = { BROWSER_MODE = "persistent" }
+```
+
+MCP 服务器没有人工确认界面，因此按“跳过确认”模式运行，但硬性限制仍然有效：受保护网站只读、已禁止的网站（与工作台共用 `permissions.json`）、密码/文件/支付字段、工作台端口。`javascript` 默认关闭，需要时加 `MCP_ALLOW_JAVASCRIPT=1`。浏览器在第一次调用工具时启动，客户端断开时关闭（CDP 模式只关闭自己的标签页）。可用环境变量：`BROWSER_MODE`、`BROWSER_CDP_URL`、`BROWSER_PROFILE_DIR`、`BROWSER_ALLOW_LOCALHOST=0`、`BROWSER_ALLOW_PRIVATE=1`、`BROWSER_HEADLESS=1`、`OBU_DATA_DIR`、`OBU_WORKBENCH_ORIGIN`（默认 `http://127.0.0.1:4318`，禁止访问）。
+
+注意：持久化配置同一时间只能被一个浏览器使用，工作台和 MCP 服务器不要同时用 `persistent` 模式。
+
 ## 环境配置
 
 ```bash
@@ -70,6 +93,7 @@ npm start
 
 ```text
 server.js                本地 HTTP API、配置、请求来源检查
+bin/mcp.js               MCP 服务器入口（stdio），实现在 lib/mcp.js
 lib/agent.js             工具调用循环、确认、暂停/恢复、追问、停止
 lib/prompt.js            系统提示词（固定内容，便于缓存）
 lib/providers/           anthropic.js（SDK 流式、自适应思考、拒绝回退）、openai.js、demo.js
@@ -104,7 +128,7 @@ Anthropic 请求使用 `messages.stream`，开启自适应思考；支持的模�
 npm test
 ```
 
-测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON 和 Anthropic SSE 流），不消耗模型额度。覆盖工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框拦截、来源检查、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、演示和移动端布局。截图输出在 `artifacts/`。
+测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON 和 Anthropic SSE 流），不消耗模型额度。覆盖 MCP 服务器（stdio 客户端实测）、工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框拦截、来源检查、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、演示和移动端布局。截图输出在 `artifacts/`。
 
 尚未用真实 Anthropic / OpenAI Key 做端到端验证。
 
