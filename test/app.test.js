@@ -131,7 +131,8 @@ test('URL guard, endpoints, key names and tool schemas', () => {
   assert.throws(() => apiEndpoint('http://example.com/v1'));
   assert.equal(normalizeKey('ctrl+a'), 'Control+a'); assert.equal(normalizeKey('cmd+shift+T'), 'Meta+Shift+T'); assert.equal(normalizeKey('enter'), 'Enter');
   for (const tool of TOOLS) { const schema = jsonSchema(tool); assert.equal(schema.type, 'object', tool.name); assert.ok(!('$schema' in schema)); }
-  assert.throws(() => parseInput(getTool('computer'), { action: 'left_click', coordinate: [5000, 1] }));
+  assert.throws(() => parseInput(getTool('computer'), { action: 'left_click', coordinate: [-1, 1] }));
+  assert.doesNotThrow(() => parseInput(getTool('computer'), { action: 'left_click', coordinate: [1500, 1] })); // Bounds depend on the live viewport and are checked when executing.
   assert.throws(() => parseInput(getTool('form_input'), { ref: '#query', value: 'x' }));
   assert.equal(detectChannel({ BROWSER_CHANNEL: 'chromium' }), 'chromium');
 });

@@ -131,6 +131,8 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     agent.control(body.command, body.answer); res.json({ ok: true });
   });
   app.get('/demo', (req, res) => res.sendFile(resolve(root, 'public/demo.html')));
+  app.get('/vendor/marked.js', (req, res) => res.sendFile(resolve(root, 'node_modules/marked/lib/marked.umd.js')));
+  app.get('/vendor/purify.js', (req, res) => res.sendFile(resolve(root, 'node_modules/dompurify/dist/purify.min.js')));
   app.use(express.static(resolve(root, 'public')));
   app.use((err, req, res, next) => res.status(400).json({ error: err instanceof z.ZodError ? '输入格式不正确，请检查必填项和步数。' : err.message.slice(0, 1000) }));
   return { app, agent, relay };

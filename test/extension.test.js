@@ -2,12 +2,13 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { WebSocket } from 'ws';
 import { createApp } from '../server.js';
+import { computerTool } from '../lib/tools/computer.js';
 
 // Branded Chrome no longer loads unpacked extensions from the command line; use a Chromium /
 // Chrome for Testing build (OBU_TEST_CHROMIUM, Playwright's own, or any cached one).
@@ -57,8 +58,8 @@ before(async () => {
   await new Promise(r => mock.listen(mockPort, '127.0.0.1', r));
   const extensionPath = resolve('extension');
   chrome = await chromium.launchPersistentContext(userDir, {
-    executablePath, headless: true, viewport: { width: 1280, height: 800 },
-    args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
+    executablePath, headless: true, viewport: null,
+    args: ['--window-size=1600,1000', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
   });
   worker = chrome.serviceWorkers()[0] || await chrome.waitForEvent('serviceworker');
 });
@@ -111,6 +112,23 @@ test('agent runs in the user\'s Chrome through the extension, only in its own ta
   assert.match(agent.task.result, /399/);
   assert.ok(agent.lastFrame, 'live screencast frames arrive through the relay');
 
+  const page = agent.browser.current();
+  const size = await page.evaluate(() => {
+    window.resizeCount = 0;
+    addEventListener('resize', () => window.resizeCount++);
+    return { width: innerWidth, height: innerHeight };
+  });
+  assert.ok(size.width > 1280, 'extension preserves the large native viewport');
+  for (let i = 0; i < 3; i++) {
+    const data = await agent.browser.screenshot({ format: 'png' });
+    const png = Buffer.from(data.split(',')[1], 'base64');
+    assert.equal(png.readUInt32BE(16), size.width, 'screenshot and click coordinates use CSS pixels');
+    assert.equal(png.readUInt32BE(20), size.height);
+  }
+  assert.equal(await page.evaluate(() => window.resizeCount), 0, 'repeated screenshots do not resize the visible page');
+  await computerTool.run({ action: 'hover', coordinate: [size.width - 10, 20] }, { browser: agent.browser });
+  await assert.rejects(computerTool.run({ action: 'hover', coordinate: [size.width + 10, 20] }, { browser: agent.browser }), /coordinate must be inside/);
+
   // The user's tab was never touched, and the agent's tab lives in its own group.
   assert.equal(await userTab.inputValue('#query'), '用户自己的输入');
   const groups = await worker.evaluate(() => chrome.tabGroups.query({ title: 'Open Browser Use' }));
@@ -128,4 +146,31 @@ test('agent runs in the user\'s Chrome through the extension, only in its own ta
   await until(() => agent.task.status === 'stopped' && !agent.browser);
   await until(async () => (await worker.evaluate(() => globalThis.obu.agentTabs.size)) === 0);
   assert.equal(userTab.isClosed(), false);
+});
+
+test('chat updates preserve existing content and expanded cards; Markdown is sanitized', { skip: !executablePath && 'no Chromium build that loads extensions' }, async () => {
+  const page = await chrome.newPage();
+  await page.goto(origin);
+  await page.waitForFunction(() => typeof renderEvents === 'function' && typeof DOMPurify !== 'undefined');
+  const result = await page.evaluate(() => {
+    const events = [{ kind: 'assistant', time: 1, message: '**概览**\n\n| 指标 | 数值 |\n|---|---|\n| Assets | 8 |\n\n<img src=x onerror="window.injected=true"><script>window.injected=true</script>' }, { kind: 'action', time: 2, tool: 'computer', message: '截图', state: 'running' }];
+    renderEvents(events);
+    const bubble = document.querySelector('#events .bubble');
+    document.querySelector('#events details').open = true;
+    events[1].state = 'done';
+    renderEvents(events);
+    events.push({ kind: 'user', time: 3, message: '继续' });
+    renderEvents(events);
+    return { same: bubble === document.querySelector('#events .bubble'), open: document.querySelector('#events details').open, strong: Boolean(bubble.querySelector('strong')), table: Boolean(bubble.querySelector('table')), unsafe: Boolean(bubble.querySelector('img, script, [onerror]')), injected: Boolean(window.injected) };
+  });
+  assert.deepEqual(result, { same: true, open: true, strong: true, table: true, unsafe: false, injected: false });
+  await page.setViewportSize({ width: 360, height: 900 });
+  await page.evaluate(() => {
+    document.getElementById('result-box').hidden = false;
+    markdown(document.getElementById('result'), '**概览**\n\n| 指标 | 数值 |\n|---|---|\n| Releases | 1 个产品 |\n| Assets | 8（120 MiB） |\n\n- 页面布局保持窗口大小\n- 操作记录更新时保留展开状态');
+  });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Markdown fits a narrow side panel');
+  await mkdir(resolve('artifacts'), { recursive: true });
+  await page.locator('#result-box').screenshot({ path: resolve('artifacts/markdown-sidepanel.png') });
+  await page.close();
 });

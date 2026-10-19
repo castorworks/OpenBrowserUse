@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Open Browser Use · 你的浏览器助手</title>
-  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+  <link rel="stylesheet" href="/style.css"><script src="/vendor/marked.js" defer></script><script src="/vendor/purify.js" defer></script><script src="/app.js" defer></script>
 </head>
 <body>
 <div class="app">
@@ -48,7 +48,7 @@
         </div>
       </section>
       <div id="events" class="events" aria-live="polite"></div>
-      <div id="result-box" class="answer" hidden><div class="answer-label">结果</div><pre id="result"></pre></div>
+      <div id="result-box" class="answer" hidden><div class="answer-label">结果</div><div id="result"></div></div>
     </div>
 
     <section class="decision" id="decision" hidden>

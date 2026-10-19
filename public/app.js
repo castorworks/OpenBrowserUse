@@ -73,6 +73,12 @@ function renderGrants(list) {
 }
 const toolIcons = { read_page: '☰', find: '⌕', get_page_text: '¶', computer: '⌖', navigate: '↗', tabs: '▭', form_input: '✎', javascript: '{}', read_console_messages: '>_', read_network_requests: '⇅' };
 function el(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text != null) node.textContent = text; return node; }
+function markdown(node, text) {
+  if (node.dataset.source === (text || '')) return;
+  node.dataset.source = text || '';
+  node.classList.add('markdown');
+  node.innerHTML = DOMPurify.sanitize(marked.parse(text || ''), { FORBID_TAGS: ['img', 'style', 'input', 'form'], FORBID_ATTR: ['style'] });
+}
 // Chat transcript: user and agent messages as bubbles, each tool call as a collapsible card.
 function renderEvents(events) {
   const key = JSON.stringify(events);
@@ -80,10 +86,30 @@ function renderEvents(events) {
   lastEventKey = key;
   const box = $('events'), scroller = $('chat-scroll');
   const nearEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 60;
-  box.replaceChildren(...events.map(e => {
+  const previous = [...box.children];
+  const nodes = events.map((e, index) => {
+    const source = JSON.stringify(e);
+    if (previous[index]?.dataset.event === source) return previous[index];
+    const node = renderEvent(e);
+    node.dataset.event = source;
+    if (node.tagName === 'DETAILS' && previous[index]?.tagName === 'DETAILS') node.open = previous[index].open;
+    return node;
+  });
+  nodes.forEach((node, index) => {
+    if (box.children[index] === node) return;
+    if (box.children[index]) box.children[index].replaceWith(node);
+    else box.append(node);
+  });
+  while (box.children.length > nodes.length) box.lastElementChild.remove();
+  if (nearEnd) scroller.scrollTop = scroller.scrollHeight;
+}
+function renderEvent(e) {
     const time = new Date(e.time).toLocaleTimeString('zh-CN', { hour12: false });
     if (e.kind === 'user' || e.kind === 'assistant') {
-      const bubble = el('div', `bubble ${e.kind}`); bubble.append(el('p', '', e.message), el('time', '', time)); return bubble;
+      const bubble = el('div', `bubble ${e.kind}`);
+      const content = el(e.kind === 'assistant' ? 'div' : 'p', '', e.message);
+      if (e.kind === 'assistant') markdown(content, e.message);
+      bubble.append(content, el('time', '', time)); return bubble;
     }
     if (e.kind === 'action') {
       const card = el('details', `tool-card ${e.state || ''}`);
@@ -95,8 +121,6 @@ function renderEvents(events) {
       return card;
     }
     const line = el('div', `event ${e.kind}`); line.append(el('time', '', time), el('span', '', e.message)); return line;
-  }));
-  if (nearEnd) scroller.scrollTop = scroller.scrollHeight;
 }
 function showFrame(data) {
   lastFrameAt = Date.now();
@@ -142,7 +166,7 @@ function render(state) {
   if (t.status !== lastStatus) { if (['done', 'failed', 'stopped'].includes(t.status)) void loadHistory(); lastStatus = t.status; }
   if (showingTask) {
     renderEvents(t.events);
-    $('result-box').hidden = !t.result; $('result').textContent = t.result;
+    $('result-box').hidden = !t.result; markdown($('result'), t.result);
   }
   // One chat box: steers a running task, continues an idle session.
   $('chat-label').textContent = busy ? '补充说明（下一步生效）' : '继续对话';
@@ -186,7 +210,7 @@ async function openReplay(id) {
     replay = await api(`sessions/${id}`);
     $('replay-banner').hidden = false; $('replay-title').textContent = `正在回放已保存的会话 · ${new Date(replay.events[0]?.time || Date.now()).toLocaleString('zh-CN', { hour12: false })}`;
     lastEventKey = ''; renderEvents(replay.events);
-    $('result-box').hidden = !replay.result; $('result').textContent = replay.result;
+    $('result-box').hidden = !replay.result; markdown($('result'), replay.result);
     if (current) render(current);
     void loadHistory();
   } catch (e) { toast(e.message); }
