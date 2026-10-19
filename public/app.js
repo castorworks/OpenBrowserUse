@@ -22,13 +22,14 @@ function syncBrowserMode() {
   document.querySelectorAll('.browser-cdp').forEach(el => el.hidden = mode !== 'cdp');
 }
 function showBrowserConfig(b) {
+  $('blocked-sites').value = (b.blockedSites || []).join('\n');
   $('browser-mode').value = b.mode; $('cdp-url').value = b.cdpURL || ''; $('allow-localhost').checked = b.allowLocalhost; $('allow-private').checked = b.allowPrivateNetwork;
   $('browser-badge').textContent = browserModes[b.mode]; syncBrowserMode();
 }
 function showConfig(config) {
   showBrowserConfig(config.browser);
   $('provider').value = config.provider; $('base-url').value = config.baseURL; $('model').value = config.model;
-  $('effort').value = config.effort; $('vision').checked = config.vision; syncProvider();
+  $('effort').value = config.effort; $('vision').checked = config.vision; $('reviewer-model').value = config.reviewerModel || ''; syncProvider();
   $('model-badge').textContent = config.model || '待配置';
   $('key-status').textContent = config.hasKey ? '· 已配置，留空保留' : config.envKey ? '· 使用环境变量' : '· 尚未配置';
 }
@@ -36,11 +37,32 @@ function pendingText(p) {
   if (!p) return '';
   if (p.question) return p.question;
   const lines = [p.summary];
+  if (p.reason) lines.push(`原因：${p.reason}`);
   if (p.target) lines.push(`目标：${p.target}`);
   if (p.input?.code) lines.push(`代码：\n${p.input.code}`);
   return lines.join('\n');
 }
+const modeHints = {
+  ask: '每次点击、输入前都请你确认；首次访问新网站时也会询问。',
+  auto: '规则和审查模型判断风险：安全的操作直接执行，购买、发送、删除等有后果的操作会请你确认。',
+  skip: '不再确认（脚本和受保护网站除外）。只用于你完全信任的任务。',
+};
+let lastGrants = '';
+function renderGrants(list) {
+  const key = JSON.stringify(list);
+  if (key === lastGrants) return; lastGrants = key;
+  if (!list.length) { $('site-grants').innerHTML = '<p class="hint">还没有保存的网站权限。</p>'; return; }
+  $('site-grants').replaceChildren(...list.map(g => {
+    const row = document.createElement('div'); row.className = 'grant';
+    const name = document.createElement('b'); name.textContent = g.site;
+    const tag = document.createElement('em'); tag.textContent = g.decision === 'allow' ? '始终允许' : '已禁止'; if (g.decision !== 'allow') tag.className = 'deny';
+    const revoke = document.createElement('button'); revoke.className = 'text-button'; revoke.textContent = '撤销';
+    revoke.onclick = async () => { try { renderGrants((await api('permissions', { action: 'revoke', site: g.site })).permissions); } catch (e) { toast(e.message); } };
+    row.append(name, tag, revoke); return row;
+  }));
+}
 function render(state) {
+  renderGrants(state.permissions || []);
   current = state;
   $('connection').textContent = '本地服务已连接'; $('connection-dot').classList.remove('offline');
   if (!configured) { showConfig(state.config); configured = true; }
@@ -74,6 +96,9 @@ function render(state) {
   $('decision-title').textContent = question ? '需要你的帮助' : '确认下一步';
   $('decision-detail').textContent = approval || question ? pendingText(t.pending) : '';
   $('user-answer').hidden = !question; $('answer').hidden = !question; $('approve').hidden = !approval; $('reject').hidden = !approval;
+  const site = approval ? t.pending?.site : null;
+  $('approve-site').hidden = !(site && t.pending.needsSite); $('approve-site').textContent = site ? `始终允许 ${site}` : '';
+  $('deny-site').hidden = !site; $('deny-site').textContent = site ? `禁止 ${site}` : '';
 }
 async function poll() { try { render(await api('state')); } catch { $('connection').textContent = '服务连接中断'; $('connection-dot').classList.add('offline'); } finally { setTimeout(poll, 1000); } }
 function handle(id, fn) { $(id).addEventListener('click', async () => { $(id).disabled = true; try { await fn(); render(await api('state')); } catch (e) { toast(e.message); } finally { $(id).disabled = false; if (current) render(current); } }); }
@@ -83,12 +108,12 @@ $('provider').addEventListener('change', () => {
   if ($('provider').value === 'openai' && $('model').value.startsWith('claude-')) $('model').value = '';
 });
 handle('save-config', async () => {
-  const config = await api('config', { provider: $('provider').value, baseURL: $('base-url').value.trim(), model: $('model').value.trim(), apiKey: $('api-key').value.trim(), clearKey: $('clear-key').checked, effort: $('effort').value, vision: $('vision').checked });
+  const config = await api('config', { provider: $('provider').value, baseURL: $('base-url').value.trim(), model: $('model').value.trim(), apiKey: $('api-key').value.trim(), clearKey: $('clear-key').checked, effort: $('effort').value, vision: $('vision').checked, reviewerModel: $('reviewer-model').value.trim() });
   $('api-key').value = ''; $('clear-key').checked = false; showConfig(config); toast('配置已保存到本地服务内存。');
 });
 $('browser-mode').addEventListener('change', syncBrowserMode);
 handle('save-browser', async () => {
-  const config = await api('browser', { mode: $('browser-mode').value, cdpURL: $('cdp-url').value.trim(), allowLocalhost: $('allow-localhost').checked, allowPrivateNetwork: $('allow-private').checked });
+  const config = await api('browser', { mode: $('browser-mode').value, cdpURL: $('cdp-url').value.trim(), allowLocalhost: $('allow-localhost').checked, allowPrivateNetwork: $('allow-private').checked, blockedSites: $('blocked-sites').value.split(/\s+/).map(x => x.trim()).filter(Boolean) });
   showBrowserConfig(config.browser); toast('浏览器设置已保存。');
 });
 handle('login-open', () => api('login', { action: 'open', url: $('start-url').value.trim() || undefined }));
@@ -97,11 +122,14 @@ async function start(demo) {
   if (!demo && !current?.config.model) { $('settings').open = true; $('model').focus(); throw new Error('先填写模型设置并保存，再开始 AI 任务。'); }
   const goal = demo ? '在演示商店搜索键盘，并读取搜索结果。' : $('goal').value.trim();
   if (!goal) { $('goal').focus(); throw new Error('请先描述任务目标。'); }
-  await api('tasks', { goal, startURL: $('start-url').value.trim(), maxSteps: Number($('max-steps').value), autoInteract: $('auto-interact').checked, demo });
+  await api('tasks', { goal, startURL: $('start-url').value.trim(), maxSteps: Number($('max-steps').value), permissionMode: $('permission-mode').value, demo });
 }
 handle('run', () => start(false)); handle('demo', () => start(true));
 for (const command of ['pause', 'resume', 'stop', 'approve', 'reject']) handle(command, () => api('control', { command }));
 handle('close-session', () => api('control', { command: 'stop' }));
+handle('approve-site', () => api('control', { command: 'approve_site' }));
+handle('deny-site', () => api('control', { command: 'deny_site' }));
+$('permission-mode').addEventListener('change', () => { $('mode-hint').textContent = modeHints[$('permission-mode').value]; });
 handle('answer', async () => { await api('control', { command: 'resume', answer: $('user-answer').value }); $('user-answer').value = ''; });
 handle('send', async () => { await api('messages', { text: $('follow-up').value }); $('follow-up').value = ''; });
 $('settings-shortcut').onclick = () => { $('settings').open = true; $('settings').scrollIntoView({ behavior: 'smooth', block: 'center' }); };

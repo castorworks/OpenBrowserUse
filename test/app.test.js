@@ -2,6 +2,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -14,16 +15,21 @@ import { detectChannel, launchChannel } from '../lib/browser/channel.js';
 import { BrowserSession } from '../lib/browser/session.js';
 import { TOOLS, getTool, jsonSchema, parseInput } from '../lib/tools/index.js';
 import { normalizeKey } from '../lib/tools/computer.js';
+import { authorize } from '../lib/permissions/policy.js';
+import { PermissionStore, siteOf } from '../lib/permissions/store.js';
+import { isBlockedSite } from '../lib/permissions/rules.js';
+import { parseVerdict } from '../lib/permissions/reviewer.js';
 
-const port = 14318, origin = `http://127.0.0.1:${port}`, openaiPort = 14319, anthropicPort = 14320;
-const { app, agent } = createApp({ port, browserOptions: { headless: true }, env: {} });
-let server, openaiServer, anthropicServer, browser, mockMode = 'normal', requests = 0, requestAuth, lastOpenAIBody, anthropicRequests = [];
+const port = 14318, origin = `http://127.0.0.1:${port}`, openaiPort = 14319, anthropicPort = 14320, sitePort = 14321;
+const dataDir = mkdtempSync(join(tmpdir(), 'obu-data-'));
+const { app, agent } = createApp({ port, browserOptions: { headless: true }, env: {}, dataDir });
+let server, openaiServer, anthropicServer, siteServer, browser, mockMode = 'normal', reviewerVerdict = 'safe', reviewerCalls = 0, requests = 0, requestAuth, lastOpenAIBody, anthropicRequests = [];
 const headers = { 'Content-Type': 'application/json', 'X-Browser-Agent': '1' };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(check, timeout = 25000) { const start = Date.now(); while (!check()) { if (Date.now() - start > timeout) throw new Error(`Timed out. State: ${agent.task?.status}, ${agent.task?.result}, ${JSON.stringify(agent.task?.events.slice(-3))}`); await sleep(60); } }
 async function post(path, body) { const response = await fetch(origin + '/api/' + path, { method: 'POST', headers, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() }; }
 async function configureOpenAI() { return post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/v1`, model: 'test-model', apiKey: 'test-secret', vision: false }); }
-async function start(extra = {}) { return post('tasks', { goal: '搜索键盘并读取价格', startURL: origin + '/demo', maxSteps: 20, autoInteract: false, ...extra }); }
+async function start(extra = {}) { return post('tasks', { goal: '搜索键盘并读取价格', startURL: origin + '/demo', maxSteps: 20, permissionMode: 'ask', ...extra }); }
 async function settle() { if (agent.busy) { try { agent.control('stop'); } catch {} } await agent.promise; if (agent.browser) { agent.control('stop'); await until(() => !agent.browser); } }
 
 // Scripted OpenAI-compatible model: read_page → form_input → click → get_page_text → answer.
@@ -35,6 +41,7 @@ function openaiReply(body) {
   const ref = label => new RegExp(`"[^"]*${label}[^"]*" \\[(ref_\\d+)\\]`).exec(toolText)?.[1];
   const call = (name, args) => ({ tool_calls: [{ id: `call_${msgs.length}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] });
   if (last.role === 'user' && JSON.stringify(last.content).includes('再确认')) return { content: '确认：价格仍是 ¥ 399。' };
+  if (mockMode === 'nav') return called.includes('navigate') ? { content: `导航结果：${msgs.at(-1).content}` } : call('navigate', { url: `http://127.0.0.1:${sitePort}/` });
   const answered = msgs.some(m => m.role === 'tool' && m.content.startsWith('用户回复'));
   if (mockMode === 'question' && !answered) return call('ask_user', { question: '请确认要搜索的商品' });
   if (!called.includes('read_page')) return call('read_page', {});
@@ -70,7 +77,12 @@ before(async () => {
   openaiServer = createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
     requests++; requestAuth = req.headers.authorization;
-    const body = JSON.parse(raw); lastOpenAIBody = body;
+    const body = JSON.parse(raw);
+    if (body.messages[0].content.startsWith('You review')) {
+      reviewerCalls++; res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ decision: reviewerVerdict, reason: `mock ${reviewerVerdict}` }) } }] })); return;
+    }
+    lastOpenAIBody = body;
     if (mockMode === 'slow') await sleep(1500);
     if (mockMode === 'error') { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end('{"error":"secret-echo"}'); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -80,15 +92,22 @@ before(async () => {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw);
     anthropicRequests.push({ url: req.url, headers: req.headers, body });
+    if (!body.stream) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: 'msg_review', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: '{"decision":"block","reason":"注入指令"}' }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 5, output_tokens: 5 } }));
+      return;
+    }
     const hasResult = body.messages.some(m => Array.isArray(m.content) && m.content.some(b => b.type === 'tool_result'));
     if (!hasResult) sse(res, [{ type: 'text', text: '先看看页面。' }, { type: 'tool_use', id: 'toolu_1', name: 'read_page', input: { filter: 'all' } }], 'tool_use');
     else sse(res, [{ type: 'text', text: '页面上有 3 件产品，其中轻音机械键盘 ¥ 399。' }], 'end_turn');
   });
   await new Promise(r => openaiServer.listen(openaiPort, '127.0.0.1', r));
   await new Promise(r => anthropicServer.listen(anthropicPort, '127.0.0.1', r));
+  siteServer = createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end('<title>Other site</title><button>Go</button>'); });
+  await new Promise(r => siteServer.listen(sitePort, '127.0.0.1', r));
   browser = await chromium.launch({ headless: true, ...launchChannel(detectChannel()) });
 });
-after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, anthropicServer].map(s => new Promise(r => s.close(r)))); });
+after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, anthropicServer, siteServer].map(s => new Promise(r => s.close(r)))); await rm(dataDir, { recursive: true, force: true }); });
 
 test('URL guard, endpoints, key names and tool schemas', () => {
   assert.throws(() => allowedURL('file:///etc/passwd', origin));
@@ -162,6 +181,70 @@ test('read_page reaches iframes and shadow DOM; refs stay stable and act across 
     const pw = /ref_\d+/.exec((await getTool('read_page').run({ filter: 'interactive', max_chars: 2000 }, { browser: session })).text)[0];
     await assert.rejects(getTool('form_input').run({ ref: pw, value: 'x' }, { browser: session }), /密码/);
   } finally { await session.close(); }
+});
+
+test('permission policy: modes, site approval, rules, blocklist and reviewer', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'obu-perm-'));
+  const store = new PermissionStore({ dir });
+  let target = { label: 'Search', tag: 'button' }, reviews = 0, verdict = 'safe';
+  let pageURL = 'https://shop.example/item';
+  const browser = { current: () => ({ url: () => pageURL }), describeTarget: async () => ({ url: pageURL, ...target }) };
+  const run = (mode, name, input, extra = {}) => authorize({ mode, tool: getTool(name), input, browser, store, taskSites: new Set(['shop.example']), review: async () => { reviews++; return { decision: verdict, reason: verdict }; }, userMessages: ['买个键盘'], summary: name, ...extra });
+  const click = { action: 'left_click', ref: 'ref_1' };
+  try {
+    assert.equal((await run('ask', 'read_page', { filter: 'all', max_chars: 1000 })).action, 'run');
+    assert.equal((await run('ask', 'computer', { action: 'screenshot' })).action, 'run');
+    const nav = await run('ask', 'navigate', { url: 'https://www.other.example/x' });
+    assert.equal(nav.action, 'ask'); assert.equal(nav.site, 'other.example'); assert.ok(nav.needsSite);
+    assert.equal((await run('skip', 'navigate', { url: 'https://other.example/' })).action, 'run');
+    assert.equal((await run('ask', 'navigate', { url: 'back' })).action, 'run');
+    assert.equal((await run('ask', 'computer', click)).action, 'ask');
+    assert.equal((await run('skip', 'computer', click)).action, 'run');
+    assert.equal((await run('skip', 'javascript', { code: 'return 1' })).action, 'ask', 'javascript always asks');
+    // auto: reviewer decides plain actions on allowed sites
+    assert.equal((await run('auto', 'computer', click)).action, 'run'); assert.equal(reviews, 1);
+    verdict = 'block'; assert.equal((await run('auto', 'computer', click)).action, 'block');
+    verdict = 'ask'; assert.equal((await run('auto', 'computer', click)).source, 'reviewer');
+    // rules run before the reviewer
+    target = { label: '立即购买', tag: 'button', submit: true, inForm: true };
+    const buy = await run('auto', 'computer', click); assert.equal(buy.action, 'ask'); assert.equal(buy.source, 'rule'); assert.equal(reviews, 3);
+    assert.equal((await run('skip', 'computer', click)).action, 'run', 'skip ignores soft rules');
+    target = { label: 'Continue', tag: 'button', submit: true, inForm: true, crossOriginForm: true, formOrigin: 'https://evil.example' };
+    assert.match((await run('auto', 'computer', click)).reason, /evil\.example/);
+    target = { label: '密码', type: 'password', password: true };
+    assert.equal((await run('skip', 'form_input', { ref: 'ref_1', value: 'x' })).action, 'block');
+    target = { label: 'Card', name: 'cardnumber', autocomplete: 'cc-number' };
+    assert.equal((await run('skip', 'form_input', { ref: 'ref_1', value: '4111' })).action, 'block');
+    // new site in auto asks for the site before calling the reviewer
+    target = { label: 'Go', tag: 'button' }; pageURL = 'https://new.example/';
+    const fresh = await run('auto', 'computer', click); assert.equal(fresh.source, 'site'); assert.equal(reviews, 3);
+    // protected sites: read-only in every mode
+    pageURL = 'https://secure.chase.com/account';
+    assert.equal((await run('skip', 'computer', click)).source, 'blocklist');
+    assert.equal((await run('skip', 'get_page_text', { max_chars: 1000 })).action, 'run');
+    assert.ok(isBlockedSite('binance.com')); assert.ok(!isBlockedSite('notchase.com'));
+    // grants persist and can be revoked
+    store.set('new.example', 'allow'); store.set('bad.example', 'deny');
+    const reloaded = new PermissionStore({ dir });
+    assert.equal(reloaded.get('new.example'), 'allow');
+    pageURL = 'https://bad.example/';
+    assert.equal((await run('skip', 'computer', click, { store: reloaded })).action, 'block', 'denied sites block even in skip');
+    reloaded.revoke('bad.example'); assert.equal(new PermissionStore({ dir }).get('bad.example'), undefined);
+    assert.equal(siteOf('http://localhost:3000/a'), 'localhost:3000'); assert.equal(siteOf('https://www.Example.com/'), 'example.com');
+    assert.equal(parseVerdict('not json').decision, 'ask');
+    assert.deepEqual(parseVerdict('```json\n{"decision":"safe","reason":"ok"}\n```'), { decision: 'safe', reason: 'ok' });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('Anthropic reviewer uses structured output and a separate request', async () => {
+  anthropicRequests = [];
+  const p = new AnthropicProvider({ apiKey: 'k', baseURL: `http://127.0.0.1:${anthropicPort}`, model: 'claude-opus-5-5', reviewerModel: 'claude-haiku-5-5' }, { system: 's', tools: [] });
+  const verdict = await p.review('{"action":"click"}', new AbortController().signal);
+  assert.deepEqual(verdict, { decision: 'block', reason: '注入指令' });
+  const req = anthropicRequests[0].body;
+  assert.equal(req.model, 'claude-haiku-5-5'); assert.equal(req.output_config.format.type, 'json_schema'); assert.equal(req.output_config.effort, 'low');
+  assert.match(req.system, /You review/);
+  assert.equal(p.convo.messages.length, 0, 'review never touches the agent conversation');
 });
 
 test('persistent profile keeps cookies across sessions', async () => {
@@ -253,6 +336,42 @@ test('OpenAI tool loop: mutating tools wait for approval, answer arrives, follow
   assert.equal(agent.browser, null);
 });
 
+test('auto mode runs reviewer-approved actions without prompts and records an audit trail', async () => {
+  mockMode = 'normal'; reviewerVerdict = 'safe'; reviewerCalls = 0; await configureOpenAI();
+  await start({ permissionMode: 'auto' }); await until(() => !agent.busy);
+  assert.equal(agent.task.status, 'done'); assert.match(agent.task.result, /399/);
+  assert.equal(reviewerCalls, 2);
+  assert.deepEqual(agent.task.audit.map(a => [a.tool, a.decision, a.source]), [['form_input', 'run', 'reviewer'], ['computer', 'run', 'reviewer']]);
+  await settle();
+  reviewerVerdict = 'block';
+  await start({ permissionMode: 'auto' }); await until(() => !agent.busy);
+  assert.ok(agent.task.audit.every(a => a.decision === 'blocked' && a.source === 'reviewer'));
+  assert.equal(await agent.browser.current().locator('#query').inputValue(), '');
+  reviewerVerdict = 'safe'; await settle();
+});
+
+test('site approval: always-allow persists, revoke clears it, deny blocks later tasks', async () => {
+  mockMode = 'nav'; await configureOpenAI();
+  const other = `127.0.0.1:${sitePort}`;
+  await start(); await until(() => agent.task.status === 'approval');
+  assert.equal(agent.task.pending.site, other); assert.ok(agent.task.pending.needsSite);
+  await post('control', { command: 'approve_site' }); await until(() => !agent.busy);
+  assert.match(agent.task.result, /Other site/);
+  assert.ok((await (await fetch(origin + '/api/state')).json()).permissions.some(p => p.site === other && p.decision === 'allow'));
+  await settle();
+  await start(); await until(() => !agent.busy);
+  assert.equal(agent.task.events.filter(e => e.kind === 'approval').length, 0, 'granted site needs no prompt');
+  await settle();
+  assert.deepEqual((await post('permissions', { action: 'revoke', site: other })).body.permissions, []);
+  await start(); await until(() => agent.task.status === 'approval');
+  await post('control', { command: 'deny_site' }); await until(() => !agent.busy);
+  await settle();
+  await start(); await until(() => !agent.busy);
+  assert.ok(agent.task.audit.some(a => a.decision === 'blocked' && a.source === 'site'));
+  await post('permissions', { action: 'revoke', site: other });
+  mockMode = 'normal'; await settle();
+});
+
 test('pause cancels pending model response, resume continues, stop ends approval wait', async () => {
   mockMode = 'slow'; const beforeRequests = requests; await start();
   await until(() => requests > beforeRequests);
@@ -282,7 +401,7 @@ test('model HTTP errors stop after three consecutive failures without leaking th
 test('Anthropic provider drives the loop through the SDK stream', async () => {
   await post('config', { provider: 'anthropic', baseURL: `http://127.0.0.1:${anthropicPort}`, model: 'claude-opus-5-5', apiKey: 'sk-test', effort: 'medium' });
   anthropicRequests = [];
-  await start({ autoInteract: true }); await until(() => !agent.busy);
+  await start({ permissionMode: 'skip' }); await until(() => !agent.busy);
   assert.equal(agent.task.status, 'done', agent.task.result); assert.match(agent.task.result, /399/);
   const [first, second] = anthropicRequests;
   assert.match(first.url, /^\/v1\/messages/);
@@ -320,7 +439,10 @@ test('UI demo runs the tool loop in a real browser without calling a model; layo
   await page.locator('#settings').evaluate(el => { el.open = true; });
   await page.selectOption('#provider', 'anthropic');
   assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), false);
+  await page.selectOption('#permission-mode', 'auto');
+  assert.match(await page.locator('#mode-hint').textContent(), /审查/);
   await page.locator('#browser-settings').evaluate(el => { el.open = true; });
+  assert.match(await page.locator('#blocked-sites').inputValue(), /paypal\.com/);
   await page.selectOption('#browser-mode', 'cdp');
   assert.equal(await page.locator('#cdp-url').isVisible(), true); assert.equal(await page.locator('#login-open').isVisible(), false);
   await page.selectOption('#browser-mode', 'persistent');

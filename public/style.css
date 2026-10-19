@@ -7,3 +7,12 @@
 #follow-up-box{margin-top:18px;border-top:1px solid var(--line);padding-top:18px}
 #follow-up-box textarea{font-size:12px;margin-top:8px}
 .settings select{margin-bottom:4px}
+.mode-label{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:10px;margin:0}
+.mode-label select{width:auto;padding:5px 8px;font-size:10px}
+.decision-buttons{flex-wrap:wrap}
+#blocked-sites{font-size:11px;font-family:monospace;line-height:1.6}
+.grant{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;padding:6px 0;border-top:1px solid #f0f3ec}
+.grant b{font-weight:500;overflow-wrap:anywhere}
+.grant em{font-style:normal;font-size:10px;color:#7c906e}
+.grant em.deny{color:#ad6655}
+.grant .text-button{flex:none}
