@@ -53,7 +53,7 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     }
     next();
   });
-  app.use(express.json({ limit: '64kb' }));
+  app.use(express.json({ limit: '8mb' }));
   const publicConfig = () => ({ ...config, apiKey: undefined, hasKey: Boolean(config.apiKey), envKey: config.provider === 'anthropic' && !config.apiKey && Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN), defaults: { baseURL: DEFAULT_BASE_URLS, model: DEFAULT_MODELS } });
   const fullState = (compact = false) => ({ config: publicConfig(), task: agent.state({ compact }), busy: agent.busy, loginOpen: Boolean(agent.login), permissions: agent.permissions.list(), extension: relay.status() });
   app.get('/api/state', (req, res) => res.json(fullState()));
@@ -136,13 +136,16 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     agent.permissions.revoke(site); res.json({ permissions: agent.permissions.list() });
   });
   app.post('/api/tasks', async (req, res) => {
-    const input = z.object({ goal: z.string().trim().min(1).max(8000), startURL: z.string().trim().max(4000).optional(), maxSteps: z.number().int().min(1).max(200).default(50), permissionMode: z.enum(MODES).default('skip'), demo: z.boolean().default(false) }).parse(req.body);
+    if (typeof req.body?.goal === 'string' && req.body.goal.trim().length > 2000000) {
+      return res.status(400).json({ error: '任务描述不能超过 2,000,000 字符，请缩短后再开始执行。' });
+    }
+    const input = z.object({ goal: z.string().trim().min(1).max(2000000), startURL: z.string().trim().max(4000).optional(), maxSteps: z.number().int().min(1).max(200000).default(50), permissionMode: z.enum(MODES).default('skip'), demo: z.boolean().default(false) }).parse(req.body);
     if (agent.busy) return res.status(409).json({ error: '已有任务正在执行。' });
     if (!input.demo) { if (!config.model) throw new Error('请先在模型设置中填写模型名。'); if (input.startURL) allowedURL(input.startURL, origin, config.browser); }
     await agent.start(input, config); res.status(202).json({ ok: true });
   });
   app.post('/api/messages', (req, res) => {
-    const { text } = z.object({ text: z.string().trim().min(1).max(8000) }).parse(req.body);
+    const { text } = z.object({ text: z.string().trim().min(1).max(2000000) }).parse(req.body);
     agent.message(text); res.status(202).json({ ok: true });
   });
   app.post('/api/control', (req, res) => {
@@ -153,7 +156,10 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
   app.get('/vendor/marked.js', (req, res) => res.sendFile(resolve(root, 'node_modules/marked/lib/marked.umd.js')));
   app.get('/vendor/purify.js', (req, res) => res.sendFile(resolve(root, 'node_modules/dompurify/dist/purify.min.js')));
   app.use(express.static(resolve(root, 'public')));
-  app.use((err, req, res, next) => res.status(400).json({ error: err instanceof z.ZodError ? '输入格式不正确，请检查必填项和步数。' : err.message.slice(0, 1000) }));
+  app.use((err, req, res, next) => {
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: '请求内容过大（最多 8 MB），请缩短输入后重试。' });
+    res.status(400).json({ error: err instanceof z.ZodError ? '输入格式不正确，请检查必填项和步数。' : err.message.slice(0, 1000) });
+  });
   return { app, agent, relay };
 }
 

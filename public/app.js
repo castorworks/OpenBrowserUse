@@ -296,6 +296,7 @@ async function start(demo) {
   if (!demo && !current?.config.model) { openDrawer('settings'); $('model').focus(); throw new Error('先填写模型设置并保存，再开始 AI 任务。'); }
   const goal = demo ? '在演示商店搜索键盘，并读取搜索结果。' : $('goal').value.trim();
   if (!goal) { $('goal').focus(); throw new Error('请先描述任务目标。'); }
+  if (goal.length > 2000000) { $('goal').focus(); throw new Error('任务描述不能超过 2,000,000 字符，请缩短后再开始执行。'); }
   await api('tasks', { goal, maxSteps: Number($('max-steps').value), permissionMode: $('permission-mode').value, demo });
   composeNew = false; if (replay) exitReplay();
   if (!demo) $('goal').value = '';
