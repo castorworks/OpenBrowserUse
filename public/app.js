@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 let current = null, configured = false, lastImage = null, lastEventKey = '', lastTask = null, lastFrameAt = 0, replay = null, lastStatus = '', composeNew = false;
-const states = { starting: '启动浏览器', running: '执行中', pausing: '正在暂停', paused: '已暂停 · 可接管', approval: '等待确认', waiting_user: '需要你的帮助', stopping: '正在停止', stopped: '已停止', done: '已完成 · 可继续', failed: '执行失败' };
+const states = { starting: '启动浏览器', running: '执行中', pausing: '正在暂停', paused: '已暂停 · 可接管', approval: '等待确认', waiting_user: '需要你的帮助', stopping: '正在停止', stopped: '已停止', done: '本轮结束 · 结果待验证', failed: '执行失败' };
 const providerLabel = { anthropic: 'Claude', deepseek: 'DeepSeek', openai: 'OpenAI 兼容', demo: '固定脚本演示' };
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').hidden = true, 6500); }
 async function api(path, data) {
@@ -141,6 +141,7 @@ function render(state) {
   if (!configured) { showConfig(state.config); configured = true; }
   const t = state.task, busy = state.busy;
   for (const id of ['run', 'demo', 'save-config']) $(id).disabled = busy;
+  $('save-config').disabled = busy || Boolean(t?.sessionOpen);
   $('save-browser').disabled = busy || Boolean(t?.sessionOpen); $('login-open').disabled = busy || Boolean(t?.sessionOpen);
   $('browser-locked').hidden = !$('save-browser').disabled;
   $('login-open').hidden = state.loginOpen; $('login-close').hidden = !state.loginOpen;
@@ -252,6 +253,7 @@ function exitReplay() { replay = null; $('replay-banner').hidden = true; lastEve
 $('replay-exit').onclick = exitReplay;
 $('new-task').onclick = () => {
   if (replay) exitReplay();
+  if (current?.busy) { composeNew = false; render(current); toast('请先处理当前任务，或停止后创建新任务。'); return; }
   composeNew = true; $('sidebar').classList.remove('open');
   if (current) render(current);
   $('goal').focus();

@@ -309,8 +309,7 @@ test('CDP attach uses only its own tabs and leaves the external browser running'
     assert.equal(session.pages().length, 1);
     assert.ok(!session.tabs().some(t => t.url === userPage.url() && t.url !== session.current().url()));
     assert.match(await getTool('read_page').run({ filter: 'interactive', max_chars: 20000 }, { browser: session }).then(r => r.text), /搜索产品/);
-    await session.navigate(`http://localhost:${port}/api/state`);
-    assert.equal(session.current().url(), `http://localhost:${port}/api/state`);
+    await assert.rejects(session.navigate(`http://localhost:${port}/api/state`));
     await session.close();
     assert.ok(external.isConnected(), 'external browser still running');
     assert.equal(userPage.isClosed(), false);

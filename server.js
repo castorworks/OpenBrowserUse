@@ -103,7 +103,7 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     await agent.deleteSession(id); res.json({ sessions: await agent.sessions.list() });
   });
   app.post('/api/config', (req, res) => {
-    if (agent.busy) return res.status(409).json({ error: '请停止任务后再修改模型配置。' });
+    if (agent.busy || agent.browser) return res.status(409).json({ error: '请关闭当前浏览器会话后再修改模型配置；当前会话继续使用创建时的模型。' });
     const parsed = z.object({
       provider: z.enum(['anthropic', 'openai', 'deepseek']).default('anthropic'), baseURL: z.string().trim().max(3000).default(''),
       model: z.string().trim().min(1).max(200), apiKey: z.string().max(4000).optional(), clearKey: z.boolean().optional(),
@@ -122,7 +122,8 @@ export function createApp({ port = 4318, browserOptions = {}, env = process.env,
     if (agent.busy || agent.browser) return res.status(409).json({ error: '请先停止任务并关闭浏览器，再修改浏览器设置。' });
     const parsed = z.object({ mode: z.enum(['ephemeral', 'persistent', 'cdp', 'extension']), cdpURL: z.string().trim().max(500).default(''), allowLocalhost: z.boolean(), allowPrivateNetwork: z.boolean(), blockedSites: z.array(z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+$/).min(3).max(200)).max(500).default(DEFAULT_BLOCKED_SITES) }).parse(req.body);
     const cdpURL = parsed.mode === 'cdp' || parsed.cdpURL ? localCDPURL(parsed.cdpURL) : config.browser.cdpURL;
-    config = { ...config, browser: { ...parsed, cdpURL } };
+    const nextConfig = { ...config, browser: { ...parsed, cdpURL } };
+    configStore.save(nextConfig); config = nextConfig;
     res.json(publicConfig());
   });
   app.post('/api/login', async (req, res) => {

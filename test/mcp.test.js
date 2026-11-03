@@ -56,7 +56,7 @@ test('MCP server exposes browser tools over stdio and drives a real browser', as
     assert.equal(image.mimeType, 'image/jpeg'); assert.ok(image.data.length > 1000);
 
     const own = await client.callTool({ name: 'navigate', arguments: { url: `${origin}/api/state` } });
-    assert.ok(!own.isError, text(own));
+    assert.ok(own.isError, text(own));
     const deniedSite = await client.callTool({ name: 'navigate', arguments: { url: `http://127.0.0.1:${deniedPort}/` } });
     assert.ok(!deniedSite.isError, text(deniedSite));
     const js = await client.callTool({ name: 'javascript', arguments: { code: 'return document.title' } });
