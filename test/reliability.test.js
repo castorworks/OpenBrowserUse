@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Agent } from '../lib/agent.js';
 import { SessionStore } from '../lib/sessions.js';
+import { AnthropicProvider } from '../lib/providers/anthropic.js';
 import { OpenAIProvider } from '../lib/providers/openai.js';
 import { ExtensionRelay } from '../lib/extension/relay.js';
 
@@ -20,29 +21,30 @@ async function fixture(t, maxSteps = 2) {
   return a;
 }
 
-test('batch actions cannot exceed the budget, and skipped calls receive results', async t => {
+test('batch actions and model turns ignore legacy step budgets', async t => {
   const a = await fixture(t, 1);
-  let results;
-  a.provider = { step: async () => ({ toolCalls: [1, 2, 3].map(id => ({ id: String(id), name: 'tabs', input: { action: 'list' } })) }), addToolResults: r => { results = r; } };
+  let results, turns = 0;
+  a.provider = { step: async () => ++turns <= 6 ? ({ toolCalls: [1, 2, 3].map(id => ({ id: String(id), name: 'tabs', input: { action: 'list' } })) }) : ({ text: 'done', toolCalls: [] }), addToolResults: r => { results = r; } };
   await a.loop();
-  assert.equal(a.task.step, 1);
-  assert.equal(a.task.history.length, 1);
+  assert.equal(a.task.step, 18);
+  assert.equal(a.task.history.length, 18);
   assert.equal(results.length, 3);
-  assert.equal(results.filter(r => r.isError).length, 2);
-  assert.equal(a.task.status, 'failed');
+  assert.equal(results.filter(r => r.isError).length, 0);
+  assert.equal(a.task.modelTurns, 7);
+  assert.equal(a.task.status, 'done');
 });
 
 test('unknown tools and invalid arguments consume attempts', async t => {
   const a = await fixture(t);
   let calls = 0;
-  a.provider = { step: async () => ({ toolCalls: [{ id: String(++calls), name: calls === 1 ? 'missing' : 'tabs', input: {} }] }), addToolResults: () => {} };
+  a.provider = { step: async () => calls >= 2 ? ({ text: 'done', toolCalls: [] }) : ({ toolCalls: [{ id: String(++calls), name: calls === 1 ? 'missing' : 'tabs', input: {} }] }), addToolResults: () => {} };
   await a.loop();
   assert.equal(calls, 2);
   assert.equal(a.task.step, 2);
   assert.ok(a.task.metrics.tools.every(x => !x.ok));
 });
 
-test('truncation is preserved by the provider, never executes tools, and has a finite turn budget', async t => {
+test('truncated output stops immediately without executing incomplete tools', async t => {
   const a = await fixture(t, 1);
   const p = new OpenAIProvider({ baseURL: 'http://localhost', model: 'mock' }, { system: 's', tools: [] });
   t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({ model: 'mock', usage: { prompt_tokens: 10 }, choices: [{ finish_reason: 'length', message: {
@@ -50,7 +52,7 @@ test('truncation is preserved by the provider, never executes tools, and has a f
   } }] }) }));
   a.provider = p;
   await a.loop();
-  assert.equal(a.task.modelTurns, 4);
+  assert.equal(a.task.modelTurns, 1);
   assert.equal(a.task.history.length, 0);
   assert.equal(a.task.status, 'failed');
   assert.equal(a.task.metrics.requests[0].usage.prompt_tokens, 10);
@@ -137,4 +139,35 @@ test('extension capability negotiation rejects old workers before opening any ta
   relay.onExtensionEvent('extension.hello', [{ protocolVersion: 1, capabilities: ['tabs.screenshot'] }]);
   await relay.prepare(); assert.equal(calls, 1);
   assert.equal(changes, 2, 'CDP event forwarding must not shadow EventEmitter notifications');
+});
+
+ test('providers send long conversation text without the former local character budget', async t => {
+  const text = '中'.repeat(2000001);
+  const openai = new OpenAIProvider({ baseURL: 'http://localhost', model: 'mock' }, { system: 's', tools: [] });
+  openai.addUserText(text);
+  let sent;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    sent = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: 'done' } }] }) };
+  });
+  await openai.step({ signal: new AbortController().signal });
+  assert.equal(sent.messages.at(-1).content[0].text, text);
+  const anthropic = new AnthropicProvider({ apiKey: 'test', baseURL: 'http://localhost', model: 'mock' }, { system: 's', tools: [] });
+  anthropic.addUserText(text);
+  t.mock.method(anthropic.client.messages, 'stream', params => {
+    sent = params;
+    return { finalMessage: async () => ({ content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }) };
+  });
+  await anthropic.step({ signal: new AbortController().signal });
+  assert.equal(sent.messages[0].content[0].text, text);
+});
+
+test('manual resume preserves long answers', async t => {
+  const a = await fixture(t);
+  a.busy = true; a.task.status = 'waiting_user';
+  const answer = '中'.repeat(10000);
+  let resumed;
+  a.resolveGate = value => { resumed = value; };
+  a.control('resume', answer);
+  assert.equal(resumed.answer, answer);
 });

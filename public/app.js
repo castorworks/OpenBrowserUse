@@ -162,7 +162,7 @@ function render(state) {
   if (lastTask !== t.id) { lastImage = null; lastEventKey = ''; lastTask = t.id; }
   $('status').textContent = t.mode === 'demo' ? `演示 · ${t.status === 'done' ? '已完成' : states[t.status] || t.status}` : states[t.status] || t.status; $('status').classList.toggle('error', t.status === 'failed');
   const live = Date.now() - lastFrameAt < 3000 && t.sessionOpen;
-  $('step-count').textContent = `动作 ${t.step} / ${t.maxSteps} · ${providerLabel[t.provider] || t.provider} · ${live ? '实时画面' : '截图随步骤更新'}`;
+  $('step-count').textContent = `动作 ${t.step} · 不限步数 · ${providerLabel[t.provider] || t.provider} · ${live ? '实时画面' : '截图随步骤更新'}`;
   $('page-url').textContent = t.snapshot?.url || '正在打开浏览器…';
   const screenshot = t.snapshot?.screenshot;
   if (!live && screenshot !== undefined && screenshot !== lastImage) { if (screenshot) $('screenshot').src = screenshot; else $('screenshot').removeAttribute('src'); lastImage = screenshot; }
@@ -298,8 +298,7 @@ async function start(demo) {
   if (!demo && !current?.config.model) { openDrawer('settings'); $('model').focus(); throw new Error('先填写模型设置并保存，再开始 AI 任务。'); }
   const goal = demo ? '在演示商店搜索键盘，并读取搜索结果。' : $('goal').value.trim();
   if (!goal) { $('goal').focus(); throw new Error('请先描述任务目标。'); }
-  if (goal.length > 2000000) { $('goal').focus(); throw new Error('任务描述不能超过 2,000,000 字符，请缩短后再开始执行。'); }
-  await api('tasks', { goal, maxSteps: Number($('max-steps').value), permissionMode: $('permission-mode').value, demo });
+  await api('tasks', { goal, permissionMode: $('permission-mode').value, demo });
   composeNew = false; if (replay) exitReplay();
   if (!demo) $('goal').value = '';
 }
