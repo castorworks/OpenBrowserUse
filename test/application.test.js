@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { startRuntime } from '../lib/runtime.js';
+
+test('desktop-only runtime rejects HTTP, fallback port is propagated, subscriptions unsubscribe and shutdown releases port', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'obu-runtime-'));
+  const blocker = createServer();
+  await new Promise(r => blocker.listen(0, '127.0.0.1', r));
+  const runtime = await startRuntime({ port: blocker.address().port, fallbackPort: true, env: {}, dataDir: dir });
+  t.after(async () => { await runtime.close(); await new Promise(r => blocker.close(r)); await rm(dir, { recursive: true, force: true }); });
+  assert.notEqual(runtime.port, blocker.address().port);
+  const get = () => runtime.api.request('GET', '/api/state');
+  const state = (await get()).body;
+  assert.equal(state.extension.serverURL, runtime.origin);
+  for (const path of ['/', '/app.js', '/style.css', '/demo', '/api/state', '/api/events', '/api/sessions', '/vendor/marked.umd.js']) assert.equal((await fetch(runtime.origin + path)).status, 404, path);
+  for (const path of ['/api/config', '/api/tasks', '/api/extension/token']) assert.equal((await fetch(runtime.origin + path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Browser-Agent': '1' }, body: '{}' })).status, 404, path);
+  let changes = 0;
+  const unsubscribe = runtime.api.subscribe((event) => { if (event === 'state') changes++; });
+  const config = { provider: 'openai', baseURL: 'http://localhost:1234', model: 'fixture', apiKey: 'fixture-key', vision: false };
+  const saved = await runtime.api.request('POST', '/api/config', config);
+  assert.equal(saved.status, 200); assert.equal(saved.body.hasKey, true); assert.equal(saved.body.apiKey, undefined);
+  await new Promise(r => setImmediate(r)); assert.ok(changes >= 2);
+  unsubscribe(); const before = changes;
+  await runtime.api.request('POST', '/api/config', { ...config, model: 'other' });
+  await new Promise(r => setImmediate(r)); assert.equal(changes, before);
+  assert.equal((await runtime.api.request('POST', '/api/tasks', { goal: '' })).status, 400);
+  assert.equal((await runtime.api.request('GET', '/api/unknown')).status, 404);
+  await Promise.all([runtime.close(), runtime.close()]);
+  await assert.rejects(fetch(runtime.origin + '/api/state'));
+});

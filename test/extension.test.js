@@ -2,12 +2,13 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { WebSocket } from 'ws';
-import { createApp } from '../server.js';
+import { createApplication } from '../lib/application.js';
+import { demoServer } from './helpers/demo-server.js';
 import { computerTool } from '../lib/tools/computer.js';
 
 // Branded Chrome no longer loads unpacked extensions from the command line; use a Chromium /
@@ -24,9 +25,8 @@ function chromiumWithExtensions() {
 
 const executablePath = chromiumWithExtensions();
 const port = 14718, origin = `http://127.0.0.1:${port}`, mockPort = 14719;
-let app, agent, relay, server, mock, dataDir, userDir, chrome, worker;
-const headers = { 'Content-Type': 'application/json', 'X-Browser-Agent': '1' };
-const post = (path, body) => fetch(`${origin}/api/${path}`, { method: 'POST', headers, body: JSON.stringify(body) }).then(async r => ({ status: r.status, body: await r.json() }));
+let api, agent, relay, server, mock, dataDir, userDir, chrome, worker;
+const post = (path, body) => api.request('POST', '/api/' + path, body);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(check, timeout = 30000) { const start = Date.now(); while (!(await check())) { if (Date.now() - start > timeout) throw new Error(`Timed out: ${agent.task?.status} ${agent.task?.result}`); await sleep(100); } }
 
@@ -47,8 +47,9 @@ before(async () => {
   if (!executablePath) return;
   dataDir = await mkdtemp(join(tmpdir(), 'obu-ext-data-'));
   userDir = await mkdtemp(join(tmpdir(), 'obu-ext-profile-'));
-  ({ app, agent, relay } = createApp({ port, env: {}, dataDir }));
-  server = await new Promise(r => { const s = app.listen(port, '127.0.0.1', () => r(s)); });
+  api = createApplication({ port, env: {}, dataDir });
+  ({ agent, relay } = api);
+  server = await new Promise(r => { const s = demoServer().listen(port, '127.0.0.1', () => r(s)); });
   relay.attach(server, port);
   mock = createServer(async (req, res) => {
     let raw = ''; for await (const c of req) raw += c;
@@ -70,7 +71,7 @@ after(async () => {
   await agent.promise; await agent.closeBrowser();
   await chrome?.close();
   await Promise.all([server, mock].map(s => new Promise(r => s.close(r))));
-  agent.sessions.close();
+  await api.close();
   await rm(dataDir, { recursive: true, force: true }); await rm(userDir, { recursive: true, force: true });
 });
 
@@ -80,35 +81,29 @@ test('extension pairs with the relay only with the right token', { skip: !execut
   assert.equal(relay.connected(), false, 'wrong token is refused');
   await worker.evaluate(o => chrome.storage.local.set({ server: o.origin, token: o.token }), { origin, token: relay.token });
   await until(() => relay.connected());
-  const state = await (await fetch(`${origin}/api/state`)).json();
+  const state = (await api.request('GET', '/api/state')).body;
   assert.equal(state.extension.connected, true);
   assert.equal(state.extension.token, undefined, 'the token is not in the streamed state');
   assert.equal((await post('extension/token', {})).body.token, relay.token);
   assert.equal((await fetch(`${origin}/api/extension/token`)).status, 404, 'a plain GET (e.g. navigating to it) cannot read the token');
-  assert.equal((await fetch(`${origin}/api/extension/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 403, 'requests without the workbench header are refused');
+  assert.equal((await fetch(`${origin}/api/extension/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 404, 'HTTP management endpoints do not exist');
   // A plain web page cannot open the extension channel.
   const refused = (url, options) => new Promise(done => { const ws = new WebSocket(url, options); ws.on('unexpected-response', (req, res) => done(res.statusCode)); ws.on('open', () => { ws.close(); done('open'); }); ws.on('error', () => {}); });
   assert.equal(await refused(`ws://127.0.0.1:${port}/relay/extension?token=${relay.token}`, { origin: 'https://evil.example' }), 403);
   assert.equal(await refused(`ws://127.0.0.1:${port}/relay/cdp/not-the-secret`), 403);
-  // The side panel shows the connection state and embeds the workbench.
+  // The side panel pairs and focuses the desktop; it cannot embed a web workbench.
   const extensionId = new URL(worker.url()).host;
   const panel = await chrome.newPage();
   await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
   await panel.waitForFunction(() => document.getElementById('status').textContent === '已连接');
-  const frame = await (await panel.waitForSelector('#workbench:not([hidden])')).contentFrame();
-  await frame.waitForFunction(() => document.getElementById('connection')?.textContent === '本地服务已连接');
-  await frame.waitForFunction(() => document.getElementById('extension-status')?.textContent.startsWith('扩展已连接'));
-  const workbench = await chrome.newPage();
-  await workbench.goto(origin);
-  await workbench.waitForFunction(() => document.getElementById('extension-status')?.textContent.startsWith('扩展已连接'));
+  assert.equal(await panel.locator('iframe').count(), 0);
+  let focused = false; relay.once('desktop-focus', () => { focused = true; });
+  await panel.locator('#open-desktop').click();
+  await until(() => focused);
   relay.extension.ws.close(1001, 'Reconnect test');
   await panel.waitForFunction(() => document.getElementById('status').textContent === '未连接');
-  await workbench.waitForFunction(() => document.getElementById('extension-status').textContent === '扩展未连接');
+  assert.equal(await panel.locator('#open-desktop').isDisabled(), true);
   await panel.waitForFunction(() => document.getElementById('status').textContent === '已连接');
-  const reloaded = await (await panel.waitForSelector('#workbench:not([hidden])')).contentFrame();
-  await reloaded.waitForFunction(() => document.getElementById('extension-status')?.textContent.startsWith('扩展已连接'));
-  await workbench.waitForFunction(() => document.getElementById('extension-status').textContent.startsWith('扩展已连接'));
-  await workbench.close();
   await panel.close();
 });
 
@@ -185,31 +180,4 @@ test('agent runs in the user\'s Chrome through the extension, only in its own ta
   await until(() => agent.task.status === 'stopped' && !agent.browser);
   await until(async () => (await worker.evaluate(() => globalThis.obu.agentTabs.size)) === 0);
   assert.equal(userTab.isClosed(), false);
-});
-
-test('chat updates preserve existing content and expanded cards; Markdown is sanitized', { skip: !executablePath && 'no Chromium build that loads extensions' }, async () => {
-  const page = await chrome.newPage();
-  await page.goto(origin);
-  await page.waitForFunction(() => typeof renderEvents === 'function' && typeof DOMPurify !== 'undefined');
-  const result = await page.evaluate(() => {
-    const events = [{ kind: 'assistant', time: 1, message: '**概览**\n\n| 指标 | 数值 |\n|---|---|\n| Assets | 8 |\n\n<img src=x onerror="window.injected=true"><script>window.injected=true</script>' }, { kind: 'action', time: 2, tool: 'computer', message: '截图', state: 'running' }];
-    renderEvents(events);
-    const bubble = document.querySelector('#events .bubble');
-    document.querySelector('#events details').open = true;
-    events[1].state = 'done';
-    renderEvents(events);
-    events.push({ kind: 'user', time: 3, message: '继续' });
-    renderEvents(events);
-    return { same: bubble === document.querySelector('#events .bubble'), open: document.querySelector('#events details').open, strong: Boolean(bubble.querySelector('strong')), table: Boolean(bubble.querySelector('table')), unsafe: Boolean(bubble.querySelector('img, script, [onerror]')), injected: Boolean(window.injected) };
-  });
-  assert.deepEqual(result, { same: true, open: true, strong: true, table: true, unsafe: false, injected: false });
-  await page.setViewportSize({ width: 360, height: 900 });
-  await page.evaluate(() => {
-    document.getElementById('result-box').hidden = false;
-    markdown(document.getElementById('result'), '**概览**\n\n| 指标 | 数值 |\n|---|---|\n| Releases | 1 个产品 |\n| Assets | 8（120 MiB） |\n\n- 页面布局保持窗口大小\n- 操作记录更新时保留展开状态');
-  });
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Markdown fits a narrow side panel');
-  await mkdir(resolve('artifacts'), { recursive: true });
-  await page.locator('#result-box').screenshot({ path: resolve('artifacts/markdown-sidepanel.png') });
-  await page.close();
 });

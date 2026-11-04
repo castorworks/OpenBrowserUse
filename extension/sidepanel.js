@@ -7,9 +7,7 @@ function show({ status, error }) {
   $('error').hidden = !error; $('error').textContent = error || '';
   if (status === 'unpaired') $('pair').hidden = false;
   const connected = status === 'connected';
-  $('workbench').hidden = !connected; $('offline').hidden = connected || status === 'unpaired';
-  if (connected && !$('workbench').src) chrome.storage.local.get('server').then(({ server }) => { $('workbench').src = server || 'http://127.0.0.1:4318'; });
-  if (!connected) $('workbench').removeAttribute('src');
+  $('open-desktop').disabled = !connected; $('offline').hidden = connected || status === 'unpaired';
 }
 
 chrome.storage.local.get(['server', 'token']).then(({ server, token }) => { if (server) $('server').value = server; if (token) $('token').value = token; });
@@ -20,4 +18,9 @@ $('pair').onsubmit = async event => {
   event.preventDefault();
   await chrome.storage.local.set({ server: $('server').value.trim().replace(/\/$/, ''), token: $('token').value.trim() });
   $('pair').hidden = true;
+};
+
+$('open-desktop').onclick = async () => {
+  try { const result = await chrome.runtime.sendMessage({ type: 'open-desktop' }); if (!result?.ok) throw new Error('请先启动并连接桌面应用。'); }
+  catch (error) { $('error').hidden = false; $('error').textContent = error.message; $('pair').hidden = false; }
 };

@@ -14,12 +14,12 @@
   </header>
   <form id="pair" hidden>
     <p>在工作台“设置 → 浏览器”中选择“Chrome 扩展”，复制配对令牌粘贴到这里。</p>
-    <label for="server">服务器地址</label><input id="server" value="http://127.0.0.1:4318" spellcheck="false">
+    <label for="server">本机连接地址</label><input id="server" value="http://127.0.0.1:4318" spellcheck="false">
     <label for="token">配对令牌</label><input id="token" type="password" autocomplete="off" spellcheck="false">
     <button type="submit">保存并连接</button>
     <p id="error" class="error" hidden></p>
   </form>
-  <iframe id="workbench" title="Open Browser Use 工作台" hidden></iframe>
-  <section id="offline" class="empty" hidden><p>没有连接到本机的 Open Browser Use 服务。</p><p>在项目目录运行 <code>npm start</code>，然后点“配对”。</p></section>
+  <section class="empty"><p>任务、会话和设置在桌面应用中管理。</p><button id="open-desktop" disabled>打开桌面工作台</button></section>
+  <section id="offline" class="empty" hidden><p>没有连接到 Open Browser Use 桌面应用。</p><p>请启动桌面应用，然后点“配对”。</p></section>
 </body>
 </html>

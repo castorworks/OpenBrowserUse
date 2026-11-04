@@ -1,22 +1,25 @@
 {
   "name": "open-browser-use",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "start": "electron .",
+    "dev": "electron .",
     "mcp": "node bin/mcp.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:desktop": "node --test test/desktop.integration.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --publish never",
+    "release:mac": "node scripts/release-mac.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "dompurify": "^3.4.17",
-    "express": "^5.1.0",
     "marked": "^18.1.1",
     "playwright": "^1.56.0",
     "ws": "^8.22.0",
@@ -24,5 +27,59 @@
   },
   "bin": {
     "openbrowseruse": "bin/mcp.js"
+  },
+  "devDependencies": {
+    "electron": "^45.2.2",
+    "electron-builder": "^26.18.0"
+  },
+  "main": "desktop/main.cjs",
+  "description": "Local AI browser agent with an Electron workbench and Chrome extension support",
+  "author": "CastorWorks",
+  "build": {
+    "appId": "com.castorworks.openbrowseruse",
+    "productName": "Open Browser Use",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**/*",
+      "lib/**/*",
+      "bin/**/*",
+      "package.json",
+      "assets/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/playwright-core/**/*",
+      "node_modules/playwright/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "extension",
+        "to": "extension"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

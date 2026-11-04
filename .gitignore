@@ -6,3 +6,6 @@ artifacts/
 # Local model credentials, including custom data directories
 model-config.json
 model-config.json.*.tmp
+
+# Desktop build output
+dist/

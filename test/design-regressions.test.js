@@ -8,6 +8,8 @@ import { reviewerInput } from '../lib/permissions/reviewer.js';
 test('document navigation invalidates refs and keyboard ref controls focus', async t => {
   const b = new BrowserSession({ headless: true, demoOrigin: 'http://127.0.0.1:4318' });
   await b.open(); t.after(() => b.close());
+  await assert.rejects(b.navigate('http://localhost:4318/api/state'), /管理接口/);
+  assert.equal(b.current().url(), 'about:blank');
   await b.navigate('data:text/html,<button>Search</button>');
   const old = (await b.readTree())[0].nodes[0].ref;
   await b.navigate('data:text/html,<button>Delete</button><input aria-label="target"><input id="other" value="123">');

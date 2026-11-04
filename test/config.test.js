@@ -3,30 +3,20 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApp } from '../server.js';
+import { createApplication } from '../lib/application.js';
 import { ConfigStore } from '../lib/config-store.js';
 
 test('model credentials survive restart, remain private, and clear persistently', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'obu-config-'));
-  // Each restart listens on a new port: fetch keeps sockets to the old server pooled, and reusing one fails with ECONNRESET.
-  let port = 14517;
-  const origin = () => `http://127.0.0.1:${port}`;
-  let server;
-  const open = async () => {
-    port++;
-    const { app } = createApp({ port, env: {}, dataDir: dir });
-    server = await new Promise(resolve => { const s = app.listen(port, '127.0.0.1', () => resolve(s)); });
-  };
-  const close = async () => { if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); server = null; } };
-  const state = async () => (await (await fetch(`${origin()}/api/state`)).json()).config;
+  let api;
+  const open = async () => { api = createApplication({ env: {}, dataDir: dir }); };
+  const close = async () => { await api?.close(); api = null; };
+  const state = async () => (await api.request('GET', '/api/state')).body.config;
   const save = async body => {
-    const response = await fetch(`${origin()}/api/config`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Browser-Agent': '1' }, body: JSON.stringify(body),
-    });
+    const response = await api.request('POST', '/api/config', body);
     assert.equal(response.status, 200);
-    const text = await response.text();
-    assert.ok(!text.includes('fixture-secret'));
-    return JSON.parse(text);
+    assert.ok(!JSON.stringify(response.body).includes('fixture-secret'));
+    return response.body;
   };
   const disk = async () => JSON.parse(await readFile(join(dir, 'model-config.json'), 'utf8'));
   const model = { provider: 'deepseek', model: 'deepseek-flash', effort: 'max', vision: true };

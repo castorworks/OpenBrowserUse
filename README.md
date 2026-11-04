@@ -4,14 +4,34 @@
 
 ## 开始使用
 
-需要 Node.js 22+ 和 Chrome / Edge（都没有时运行 `npx playwright install chromium`）。
+从源码启动需要 Node.js 22.12+ 和 Chrome / Edge（都没有时运行 `npx playwright install chromium`）。打包后的桌面应用自带 Node.js，不需要用户安装 Node；自动化浏览器仍使用外部 Chrome / Edge 或已安装的 Playwright Chromium。
 
 ```bash
 npm install
 npm start
 ```
 
-打开 http://127.0.0.1:4318 。点击“先体验本地演示”可以无需 Key 验证真实浏览器和工具循环。**演示使用固定脚本，不代表模型智能。**
+这会打开 Electron 桌面工作台并自动启动独立后台。点击“本地演示”可以无需 Key 验证真实浏览器和工具循环。**演示使用固定脚本，不代表模型智能。**
+
+桌面窗口加载本地资源，通过受限 IPC 调用独立 Node.js 后台；浏览器自动化与模型调用不会运行在界面进程里。工作台仅提供 Electron 桌面入口，已移除网页启动方式、HTTP 管理 API 和 SSE。扩展端口只支持经过认证的 WebSocket 中继，普通 HTTP 请求返回 404。演示商店随应用打包，在浏览器中加载内嵌资源，无需本地网站服务。
+
+- 双击打包应用或运行 `npm start` 即可使用。macOS 关闭窗口后后台继续运行，可从 Dock / 菜单栏重新打开；通过菜单“退出”或 Cmd+Q 会停止任务、关闭代理浏览器并释放中继。Windows / Linux 关闭最后一个窗口会退出应用。
+- 应用只启动一个桌面实例；重复启动会聚焦已有窗口。后台异常退出时工作台会提示重新打开应用，不会自动重跑任务。
+- 模型配置、历史、配对令牌和专用浏览器配置沿用 `~/.openbrowseruse`，可直接使用原网页版本的数据。`OBU_DATA_DIR`、`BROWSER_PROFILE_DIR` 等环境变量继续有效。
+- 扩展服务优先监听 `127.0.0.1:4318`；端口被占用时桌面应用使用可用端口。设置中的“扩展服务器地址”显示实际地址，请在扩展配对界面同步填写。可用 `OBU_DESKTOP_PORT` 指定首选端口（`0` 表示随机端口）。
+- “导出”使用原生保存对话框；“打开 Chrome 扩展目录”可定位随应用一起分发的扩展。
+
+生成桌面安装包：
+
+```bash
+npm run pack            # 当前平台的可运行应用目录，输出到 dist/
+npm run dist            # macOS DMG/ZIP、Windows NSIS 或 Linux AppImage
+npm run test:desktop    # 真实 Electron + Chrome 扩展集成测试
+```
+
+发布包需要在目标系统构建和验证。默认 macOS 构建跳过签名；对外分发需覆盖 `build.mac.identity` 并配置 Developer ID 签名和公证，Windows 可配置代码签名；仓库不含签名证书，也不会自动发布。构建时不会把本机的 Key、会话数据库或浏览器配置打包进去。首次启动开发版或打包时会下载 Electron 运行时。
+
+正式发布 macOS ARM64 包使用 `npm run release:mac`。先在钥匙串安装带私钥的 Developer ID Application 证书，并用 `xcrun notarytool store-credentials` 交互式配置公证凭据；设置 `CSC_NAME` 为证书中的公司名称或 SHA-1、`APPLE_KEYCHAIN_PROFILE` 为凭据名称。发布脚本会先检查证书和登录，再强制签名、启用 Hardened Runtime、提交 Apple 公证、装订并验证票据，最后生成 `dist/SHA256SUMS.txt`。缺少签名或公证配置时直接失败，不会把未签名包当作正式发布包。证书、私钥和密码不存入仓库。首次创建 Developer ID 证书需要团队 Account Holder 操作，普通 Admin 账号不能代为创建。
 
 在“模型设置”里选择服务类型：
 
@@ -23,7 +43,7 @@ npm start
 
 浏览器设置、受保护网站列表、模型配置和 API Key 保存到 `~/.openbrowseruse/model-config.json`（可用 `OBU_DATA_DIR` 指定目录），服务重启后自动恢复。Key 以明文保存在本机文件，API 响应不会返回 Key。保存时 Key 留空会保留同一服务的已有 Key；勾选“清除已保存的 Key”后保存会同步清除磁盘中的 Key。切换服务商或 Base URL 会清除旧 Key。已保存的模型配置优先于启动环境变量；没有配置文件时使用环境变量初始化。
 
-工作台通过服务器推送（SSE）实时更新：浏览器视图是代理当前标签页的实时画面（CDP screencast），“对话”面板按时间显示你的消息、代理的说明，以及每次工具调用的卡片（点开可看输入和结果）。执行过程中可以在对话框里补充说明，下一步生效；代理用 `ask_user` 提问时，对话框里的回复就是答案。
+桌面工作台通过 IPC 实时更新：浏览器视图是代理当前标签页的实时画面（CDP screencast），“对话”面板按时间显示你的消息、代理的说明，以及每次工具调用的卡片（点开可看输入和结果）。执行过程中可以在对话框里补充说明，下一步生效；代理用 `ask_user` 提问时，对话框里的回复就是答案。
 
 “暂停 / 接管”会取消当前模型请求，在当前浏览器操作结束后暂停。可以直接操作浏览器窗口，然后点击“继续执行”。模型回答后浏览器保持打开，可以继续对话，或点击“关闭浏览器”结束会话。
 
@@ -69,10 +89,10 @@ npm start
 
 `extension/` 是一个 Manifest V3 扩展，让代理在你自己的 Chrome 里工作：
 
-1. 运行 `npm start`。
-2. 打开 `chrome://extensions`，开启“开发者模式”，点“加载已解压的扩展程序”，选择项目里的 `extension` 文件夹（需要 Chrome 125+）。
+1. 打开桌面应用（源码运行 `npm start`）。
+2. 打开 `chrome://extensions`，开启“开发者模式”，点“加载已解压的扩展程序”，选择 `extension` 文件夹（桌面版可在“设置 → 浏览器 → Chrome 扩展”中点击“打开 Chrome 扩展目录”，需要 Chrome 125+）。
 3. 在工作台“设置 → 浏览器”中选择“Chrome 扩展”，保存，复制“配对令牌”。
-4. 点 Chrome 工具栏上的 Open Browser Use 图标打开侧边栏，点“配对”，粘贴令牌并保存。连接成功后侧边栏里就是工作台，可以直接在侧边栏下达任务。
+4. 点 Chrome 工具栏上的 Open Browser Use 图标打开侧边栏，点“配对”，填写工作台显示的“扩展服务器地址”、粘贴令牌并保存。侧边栏显示配对和连接状态，点击“打开桌面工作台”可唤起应用；任务、对话、历史和设置统一在桌面应用中管理。
 
 工作方式：扩展通过 WebSocket 连接本机服务（`/relay/extension`，需要令牌，并且只接受 `chrome-extension://` 来源）。服务端的中继把它模拟成一个 Chrome 调试端点，Playwright 照常连接，所有工具、元素引用、实时画面和权限规则都不变。扩展只为它自己打开的标签页挂上 `chrome.debugger`，这些标签页放在名为“Open Browser Use”的绿色标签组里，代理打开的弹出窗口也归入其中；你自己的标签页不会被读取、操作或关闭，即使服务端直接请求也会被扩展拒绝。停止任务时关闭代理的标签页并释放调试器。
 
@@ -121,7 +141,9 @@ npm start
 ## 实现结构
 
 ```text
-server.js                本地 HTTP API、配置、请求来源检查
+desktop/                 Electron 主进程、本地工作台桥接和独立后台入口
+lib/application.js       桌面后台的配置、任务和会话接口
+lib/runtime.js           本机监听、端口分配、中继和退出清理
 bin/mcp.js               MCP 服务器入口（stdio），实现在 lib/mcp.js
 lib/agent.js             工具调用循环、确认、暂停/恢复、追问、执行中补充、实时画面、停止
 lib/sessions.js          会话保存（node:sqlite）
@@ -132,7 +154,8 @@ lib/providers/           anthropic.js（SDK 流式、自适应思考、拒绝回
 lib/tools/               read_page / find / get_page_text、computer、navigate / tabs / form_input、控制台/网络/javascript
 lib/permissions/         权限模式、网站授权、规则、受保护网站、审查模型
 lib/browser/             会话、跨 iframe 和 Shadow DOM 的元素引用、URL 解析、浏览器选择
-public/                  中文工作台和本地演示商店
+desktop/renderer/        中文桌面工作台，仅使用 preload IPC 桥接
+assets/demo/             本地演示商店，由 lib/demo.js 内嵌加载
 test/app.test.js         真实浏览器 + 模拟 OpenAI / Anthropic 接口的集成测试
 ```
 
@@ -164,7 +187,7 @@ Anthropic 请求使用 `messages.stream`，开启自适应思考；支持的模�
 npm test
 ```
 
-测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON 和 Anthropic SSE 流），不消耗模型额度。覆盖 Chrome 扩展（真实加载扩展：配对、标签组隔离、实时画面、侧边栏）、MCP 服务器（stdio 客户端实测）、SSE 实时状态和画面、执行中补充、会话保存与回放、工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框输入、来源检查、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、演示和移动端布局。截图输出在 `artifacts/`。
+测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON 和 Anthropic SSE 流），不消耗模型额度。覆盖 Chrome 扩展（真实加载扩展：配对、标签组隔离、实时画面、侧边栏）、MCP 服务器（stdio 客户端实测）、IPC 实时状态和画面、执行中补充、会话保存与回放、工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框输入、IPC 调用来源检查、HTTP 网页入口不可用、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、本地演示、Markdown 安全渲染和桌面导出。截图输出在 `artifacts/`。
 
 扩展测试需要能加载解压扩展的 Chromium / Chrome for Testing（正式版 Chrome 已不支持 `--load-extension`）：默认使用 Playwright 自带或缓存中的 Chromium，也可用 `OBU_TEST_CHROMIUM=<可执行文件路径>` 指定；找不到时跳过。
 

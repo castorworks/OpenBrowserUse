@@ -3,10 +3,7 @@ let current = null, configured = false, lastImage = null, lastEventKey = '', las
 const states = { starting: '启动浏览器', running: '执行中', pausing: '正在暂停', paused: '已暂停 · 可接管', approval: '等待确认', waiting_user: '需要你的帮助', stopping: '正在停止', stopped: '已停止', done: '本轮结束 · 结果待验证', failed: '执行失败' };
 const providerLabel = { anthropic: 'Claude', deepseek: 'DeepSeek', openai: 'OpenAI 兼容', demo: '固定脚本演示' };
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').hidden = true, 6500); }
-async function api(path, data) {
-  const res = await fetch(`/api/${path}`, data ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Browser-Agent': '1' }, body: JSON.stringify(data) } : {});
-  const body = await res.json(); if (!res.ok) throw new Error(body.error || '请求失败'); return body;
-}
+const api = (path, data) => window.desktop.request(path, data);
 const providerHints = {
   anthropic: { base: '留空使用 Anthropic 官方地址', hint: '（可选）', model: '例如 claude-opus-5-5' },
   deepseek: { base: 'https://api.deepseek.com', hint: '（默认官方地址）', model: '图像识别使用 deepseek-flash' },
@@ -133,10 +130,13 @@ function render(state) {
   const previousBusy = current?.busy;
   renderGrants(state.permissions || []);
   if (state.extension) {
+    $('extension-server').value = state.extension.serverURL || location.origin;
     $('extension-dot').classList.toggle('offline', !state.extension.connected);
     $('extension-status').textContent = state.extension.connected ? `扩展已连接${state.extension.browser ? ` · ${(/Chrome\/[\d.]+/.exec(state.extension.browser) || [''])[0]}` : ''}` : '扩展未连接';
   }
   current = state;
+  $('model-badge').textContent = state.config.model || '待配置';
+  $('browser-badge').textContent = browserModes[state.config.browser.mode];
   $('connection').textContent = '本地服务已连接'; $('connection-dot').classList.remove('offline');
   if (!configured) { showConfig(state.config); configured = true; }
   const t = state.task, busy = state.busy;
@@ -186,14 +186,13 @@ function render(state) {
   $('deny-site').hidden = !site; $('deny-site').textContent = site ? `禁止 ${site}` : '';
 }
 function offline() { $('connection').textContent = '服务连接中断'; $('connection-dot').classList.add('offline'); }
-async function poll() { try { render(await api('state')); } catch { offline(); } finally { if (!window.EventSource) setTimeout(poll, 1000); } }
-// Live updates over server-sent events; the browser reconnects on its own after errors.
 function connect() {
-  if (!window.EventSource) return poll();
-  const source = new EventSource('/api/events');
-  source.addEventListener('state', e => render(JSON.parse(e.data)));
-  source.addEventListener('frame', e => { if (current?.task) showFrame(e.data); });
-  source.onerror = offline;
+  const unsubscribe = window.desktop.subscribe(({ event, data }) => {
+    if (event === 'state') render(data);
+    else if (event === 'frame' && current?.task) showFrame(data);
+    else if (event === 'offline') { offline(); if (data) toast(data); }
+  });
+  window.addEventListener('beforeunload', unsubscribe, { once: true });
 }
 async function loadHistory() {
   try { renderHistory((await api('sessions')).sessions); } catch (e) { toast(e.message); }
@@ -265,7 +264,7 @@ function showTab(tab) {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.drawer-panel').forEach(p => { p.hidden = p.id !== tab; });
 }
-function openDrawer(tab = 'settings') { showTab(tab); $('drawer').hidden = false; $('backdrop').hidden = false; }
+function openDrawer(tab = 'settings') { if (current && $('drawer').hidden) showConfig(current.config); showTab(tab); $('drawer').hidden = false; $('backdrop').hidden = false; }
 function closeDrawer() { $('drawer').hidden = true; $('backdrop').hidden = true; }
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $('drawer-close').onclick = closeDrawer; $('backdrop').onclick = closeDrawer;
@@ -314,6 +313,8 @@ handle('send', async () => { await api('messages', { text: $('follow-up').value 
 document.querySelectorAll('[data-goal]').forEach(button => button.onclick = () => { $('goal').value = button.dataset.goal; $('goal').focus(); });
 // Enter sends from either composer; Shift+Enter adds a line.
 for (const [input, button] of [['goal', 'run'], ['follow-up', 'send']]) $(input).addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $(button).click(); } });
-$('export').onclick = async () => { try { const t = replay || (await api('state')).task; if (!t) return; const data = { ...t, snapshot: t.snapshot ? { ...t.snapshot, screenshot: undefined } : null }; const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `open-browser-use-${t.id}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); } catch (e) { toast(e.message); } };
+$('export').onclick = async () => { try { const result = await window.desktop.exportSession(replay?.id || null); if (!result.canceled) toast('会话已导出。'); } catch (e) { toast(e.message); } };
+$('open-extension-directory').hidden = false;
+$('open-extension-directory').onclick = () => window.desktop.openExtensionDirectory().catch(e => toast(e.message));
 connect();
 void loadHistory();

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { createApp } from '../server.js';
+import { demoServer } from './helpers/demo-server.js';
 
 const port = 14418, origin = `http://127.0.0.1:${port}`, deniedPort = 14419;
 let server, denied, dataDir;
@@ -25,7 +25,7 @@ const text = result => result.content.filter(c => c.type === 'text').map(c => c.
 before(async () => {
   dataDir = await mkdtemp(join(tmpdir(), 'obu-mcp-'));
   await writeFile(join(dataDir, 'permissions.json'), JSON.stringify({ sites: { [`127.0.0.1:${deniedPort}`]: { decision: 'deny' } } }));
-  ({ app: server } = createApp({ port, browserOptions: { headless: true }, env: {}, dataDir }));
+  server = demoServer();
   server = await new Promise(r => { const s = server.listen(port, '127.0.0.1', () => r(s)); });
   denied = createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<title>denied</title>'); });
   await new Promise(r => denied.listen(deniedPort, '127.0.0.1', r));

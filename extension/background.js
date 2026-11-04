@@ -161,6 +161,12 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(''))) return;
+  if (message?.type === 'open-desktop') {
+    const ok = ws?.readyState === WebSocket.OPEN;
+    if (ok) send({ method: 'desktop.focus', params: [] });
+    reply({ ok }); return;
+  }
   if (message?.type === 'get-status') { reply({ ...state }); return; }
   if (message?.type === 'reconnect') { ws?.close(); ws = null; void connect(); reply({ ok: true }); }
 });

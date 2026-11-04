@@ -1,12 +1,13 @@
 import test, { before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { createApp } from '../server.js';
+import { createApplication } from '../lib/application.js';
+import { demoServer } from './helpers/demo-server.js';
 import { Agent } from '../lib/agent.js';
 import { apiEndpoint, OpenAIProvider } from '../lib/providers/openai.js';
 import { AnthropicProvider } from '../lib/providers/anthropic.js';
@@ -22,12 +23,13 @@ import { parseVerdict } from '../lib/permissions/reviewer.js';
 
 const port = 14318, origin = `http://127.0.0.1:${port}`, openaiPort = 14319, anthropicPort = 14320, sitePort = 14321;
 const dataDir = mkdtempSync(join(tmpdir(), 'obu-data-'));
-const { app, agent } = createApp({ port, browserOptions: { headless: true }, env: {}, dataDir });
+const api = createApplication({ port, browserOptions: { headless: true }, env: {}, dataDir });
+const { agent } = api;
 let server, openaiServer, anthropicServer, siteServer, browser, mockMode = 'normal', reviewerVerdict = 'safe', reviewerCalls = 0, requests = 0, requestAuth, lastOpenAIBody, anthropicRequests = [];
-const headers = { 'Content-Type': 'application/json', 'X-Browser-Agent': '1' };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(check, timeout = 25000) { const start = Date.now(); while (!check()) { if (Date.now() - start > timeout) throw new Error(`Timed out. State: ${agent.task?.status}, ${agent.task?.result}, ${JSON.stringify(agent.task?.events.slice(-3))}`); await sleep(60); } }
-async function post(path, body) { const response = await fetch(origin + '/api/' + path, { method: 'POST', headers, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() }; }
+const post = (path, body) => api.request('POST', '/api/' + path, body);
+const get = path => api.request('GET', '/api/' + path);
 async function configureOpenAI() { return post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/v1`, model: 'test-model', apiKey: 'test-secret', vision: false }); }
 async function start(extra = {}) { return post('tasks', { goal: '搜索键盘并读取价格', startURL: origin + '/demo', maxSteps: 20, permissionMode: 'ask', ...extra }); }
 async function settle() { if (agent.busy) { try { agent.control('stop'); } catch {} } await agent.promise; if (agent.browser) { agent.control('stop'); await until(() => !agent.browser); } }
@@ -74,7 +76,7 @@ function sse(res, blocks, stopReason) {
 }
 
 before(async () => {
-  server = await new Promise(r => { const s = app.listen(port, '127.0.0.1', () => r(s)); });
+  server = await new Promise(r => { const s = demoServer().listen(port, '127.0.0.1', () => r(s)); });
   openaiServer = createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
     requests++; requestAuth = req.headers.authorization;
@@ -115,7 +117,7 @@ before(async () => {
 });
 // A test that fails midway can leave the agent waiting at a gate; stop it so the next test starts clean.
 afterEach(async () => { await settle(); mockMode = 'normal'; reviewerVerdict = 'safe'; });
-after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, anthropicServer, siteServer].map(s => new Promise(r => s.close(r)))); agent.sessions.close(); await rm(dataDir, { recursive: true, force: true }); });
+after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, anthropicServer, siteServer].map(s => new Promise(r => s.close(r)))); await api.close(); await rm(dataDir, { recursive: true, force: true }); });
 
 test('URL guard, endpoints, key names and tool schemas', () => {
   assert.equal(allowedURL('file:///tmp/example', origin), 'file:///tmp/example');
@@ -317,12 +319,10 @@ test('CDP attach uses only its own tabs and leaves the external browser running'
   } finally { await external.close(); }
 });
 
-test('API blocks foreign origins, validates input and never returns a configured key', async () => {
-  const foreign = await fetch(origin + '/api/config', { method: 'POST', headers: { ...headers, Origin: 'https://evil.example' }, body: '{}' });
-  assert.equal(foreign.status, 403);
+test('application validates input and never returns a configured key', async () => {
   assert.equal((await post('tasks', { goal: '' })).status, 400);
   await configureOpenAI();
-  assert.ok(!(await (await fetch(origin + '/api/state')).text()).includes('test-secret'));
+  assert.ok(!JSON.stringify((await get('state')).body).includes('test-secret'));
   const changed = await post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/other`, model: 'test', apiKey: '' });
   assert.equal(changed.body.hasKey, false);
   await configureOpenAI();
@@ -386,7 +386,7 @@ test('site approval: always-allow persists, revoke clears it, deny blocks later 
   assert.equal(agent.task.pending.site, other); assert.ok(agent.task.pending.needsSite);
   await post('control', { command: 'approve_site' }); await until(() => !agent.busy);
   assert.match(agent.task.result, /Other site/);
-  assert.ok((await (await fetch(origin + '/api/state')).json()).permissions.some(p => p.site === other && p.decision === 'allow'));
+  assert.ok((await get('state')).body.permissions.some(p => p.site === other && p.decision === 'allow'));
   await settle();
   await start(); await until(() => !agent.busy);
   assert.equal(agent.task.events.filter(e => e.kind === 'approval').length, 0, 'granted site needs no prompt');
@@ -412,33 +412,15 @@ test('without a start page the task opens a blank tab; a site named in the goal 
   assert.match(agent.task.result, /Other site/);
 });
 
-// Reads server-sent events until `want` returns true for the collected events (or times out).
+// Exercise the same subscriptions forwarded by the desktop background process.
 async function readEvents(want, timeout = 20000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  const res = await fetch(origin + '/api/events', { signal: controller.signal });
-  const reader = res.body.getReader(); const decoder = new TextDecoder();
-  const events = []; let buffer = '';
-  try {
-    while (!want(events)) {
-      const { value, done } = await reader.read().catch(error => {
-        if (!controller.signal.aborted) throw error;
-        throw new Error(`No matching events after ${timeout} ms: ${events.filter(e => e.type === 'frame').length} frames, ${events.filter(e => e.type === 'state').length} states. Task: ${agent.task?.status}, ${JSON.stringify(agent.task?.events.slice(-3))}`);
-      });
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let i;
-      while ((i = buffer.indexOf('\n\n')) >= 0) {
-        const chunk = buffer.slice(0, i); buffer = buffer.slice(i + 2);
-        const type = /^event: (.+)$/m.exec(chunk)?.[1]; const data = /^data: (.*)$/m.exec(chunk)?.[1];
-        if (type) events.push({ type, data });
-      }
-    }
-  } finally { clearTimeout(timer); controller.abort(); }
-  return events;
+  const events = [];
+  const unsubscribe = api.subscribe((type, data) => events.push({ type, data: type === 'frame' ? data : JSON.stringify(data) }));
+  try { await until(() => want(events), timeout); return events; }
+  finally { unsubscribe(); }
 }
 
-test('live updates: SSE pushes state changes and screencast frames; messages steer a running task', async () => {
+test('live updates: subscriptions push state changes and screencast frames; messages steer a running task', async () => {
   mockMode = 'slow'; await configureOpenAI();
   const streamed = readEvents(events => events.some(e => e.type === 'frame') && events.some(e => e.type === 'state' && JSON.parse(e.data).task?.events.some(x => x.kind === 'user' && x.message === '顺便看看价格')));
   await start();
@@ -474,26 +456,16 @@ test('sessions are saved with tool cards and can be listed, replayed and deleted
   await start({ permissionMode: 'skip' }); await until(() => !agent.busy);
   const id = agent.task.id;
   await settle();
-  const { sessions } = await (await fetch(origin + '/api/sessions')).json();
+  const { sessions } = (await get('sessions')).body;
   assert.equal(sessions[0].id, id); assert.equal(sessions[0].status, 'stopped');
-  const saved = await (await fetch(`${origin}/api/sessions/${id}`)).json();
+  const saved = (await get(`sessions/${id}`)).body;
   const card = saved.events.find(e => e.kind === 'action' && e.tool === 'get_page_text');
   assert.equal(card.state, 'ok'); assert.match(card.output, /搜索结果：键盘/);
   assert.match(saved.result, /399/);
   assert.equal(saved.snapshot.screenshot, undefined, 'screenshots are not stored');
-  assert.equal((await fetch(`${origin}/api/sessions/00000000-0000-4000-8000-000000000000`)).status, 404);
-  // Deleted by hand from the history sidebar: the first click only asks for confirmation.
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.goto(origin);
-  const row = page.locator(`.history-row[data-id="${id}"]`);
-  await row.hover();
-  await row.locator('.history-delete').click();
-  assert.equal(await row.locator('.history-delete').textContent(), '确认删除');
-  assert.ok((await agent.sessions.list()).some(s => s.id === id), 'one click does not delete');
-  await row.locator('.history-delete').click();
-  await row.waitFor({ state: 'detached' });
+  assert.equal((await get('sessions/00000000-0000-4000-8000-000000000000')).status, 404);
+  assert.equal((await post('sessions/delete', { id })).status, 200);
   assert.ok(!(await agent.sessions.list()).some(s => s.id === id));
-  await page.close();
   await agent.save();
   assert.ok(!(await agent.sessions.list()).some(s => s.id === id), 'the deleted current task is not saved again');
 });
@@ -571,59 +543,11 @@ test('Anthropic provider drives the loop through the SDK stream', async () => {
   await settle(); await configureOpenAI();
 });
 
-test('UI demo runs the tool loop in a real browser without calling a model; layouts fit', async () => {
-  agent.task = null;
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
-  const errors = []; page.on('pageerror', e => errors.push(e.message));
-  await page.goto(origin); await page.waitForFunction(() => document.getElementById('connection').textContent === '本地服务已连接');
-  await mkdir('artifacts', { recursive: true });
-  await page.screenshot({ path: 'artifacts/workbench.png', fullPage: true });
+test('bundled demo runs the real browser tool loop without HTTP hosting or a model', async () => {
   const beforeRequests = requests;
-  assert.equal(await page.locator('#permission-mode').inputValue(), 'skip');
-  await page.locator('#demo').click();
-  await until(() => agent.task?.mode === 'demo' && !agent.busy);
-  await page.waitForFunction(() => document.getElementById('result').textContent.includes('演示完成'));
+  assert.equal((await post('tasks', { goal: '演示', demo: true })).status, 202);
+  await until(() => !agent.busy);
   assert.equal(agent.task.status, 'done'); assert.equal(requests, beforeRequests);
   assert.match(agent.task.result, /搜索结果：键盘 · 1 件/);
-  assert.equal(await page.locator('#screenshot').isVisible(), true);
-  await page.waitForFunction(() => !document.getElementById('run').disabled);
-  await page.screenshot({ path: 'artifacts/demo-complete.png', fullPage: true });
-  await page.reload();
-  await page.waitForFunction(() => document.getElementById('result').textContent.includes('演示完成'));
-  await page.locator('#screenshot').waitFor({ state: 'visible' });
-  await page.locator('#settings-shortcut').click();
-  assert.equal(await page.locator('#drawer').isVisible(), true);
-  await page.selectOption('#provider', 'deepseek');
-  assert.equal(await page.locator('#base-url').inputValue(), 'https://api.deepseek.com');
-  assert.equal(await page.locator('#model').inputValue(), 'deepseek-flash');
-  assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), true);
-  assert.equal(await page.locator('#vision').isChecked(), true);
-  await page.selectOption('#provider', 'anthropic');
-  assert.equal(await page.locator('#effort').isVisible(), true); assert.equal(await page.locator('#vision').isVisible(), false);
-  assert.ok(await page.locator('.tool-card').count() >= 3, 'tool calls render as cards');
-  assert.ok(await page.locator('.bubble.user').count() >= 1);
-  await page.selectOption('#permission-mode', 'auto');
-  assert.match(await page.locator('#mode-hint').textContent(), /审查/);
-  await page.locator('[data-tab="browser-settings"]').click();
-  assert.equal(await page.locator('#blocked-sites').inputValue(), '');
-  await page.selectOption('#browser-mode', 'cdp');
-  assert.equal(await page.locator('#cdp-url').isVisible(), true); assert.equal(await page.locator('#login-open').isVisible(), false);
-  await page.selectOption('#browser-mode', 'extension');
-  await page.waitForFunction(() => document.getElementById('extension-token').value.length >= 20);
-  assert.equal(await page.locator('#extension-status').textContent(), '扩展未连接');
-  await page.selectOption('#browser-mode', 'persistent');
-  assert.equal(await page.locator('#login-open').isVisible(), true);
-  await page.screenshot({ path: 'artifacts/browser-settings.png' });
-  await page.locator('[data-tab="permissions-panel"]').click();
-  assert.equal(await page.locator('#blocked-sites').isVisible(), true);
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('#drawer').isVisible(), false);
-  // New task returns to the start screen without touching the finished session.
-  await page.locator('#new-task').click();
-  assert.equal(await page.locator('#welcome').isVisible(), true);
-  assert.equal(await page.locator('#task-composer').isVisible(), true);
-  await page.setViewportSize({ width: 390, height: 844 });
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), await page.evaluate(() => [...document.querySelectorAll('body *')].filter(e => e.getBoundingClientRect().right > innerWidth + 1).slice(0, 6).map(e => `${e.tagName}.${e.className}#${e.id} ${Math.round(e.getBoundingClientRect().right)}`).join(' | ')));
-  await page.screenshot({ path: 'artifacts/mobile.png', fullPage: true });
-  assert.deepEqual(errors, []); await page.close();
+  assert.ok(agent.task.snapshot.screenshot.startsWith('data:image/'));
 });
