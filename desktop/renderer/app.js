@@ -36,6 +36,7 @@ function showBrowserConfig(b) {
 function showConfig(config) {
   showBrowserConfig(config.browser);
   $('provider').value = config.provider; $('base-url').value = config.baseURL; $('model').value = config.model;
+  $('context-window').value = config.contextWindow || 128000; $('output-reserve').value = config.outputReserve || 16000;
   $('effort').value = config.effort; $('vision').checked = config.vision; $('reviewer-model').value = config.reviewerModel || ''; syncProvider();
   $('model-badge').textContent = config.model || '待配置';
   $('key-status').textContent = config.hasKey ? '· 已配置，留空保留' : config.envKey ? '· 使用环境变量' : '· 尚未配置';
@@ -162,7 +163,8 @@ function render(state) {
   if (lastTask !== t.id) { lastImage = null; lastEventKey = ''; lastTask = t.id; }
   $('status').textContent = t.mode === 'demo' ? `演示 · ${t.status === 'done' ? '已完成' : states[t.status] || t.status}` : states[t.status] || t.status; $('status').classList.toggle('error', t.status === 'failed');
   const live = Date.now() - lastFrameAt < 3000 && t.sessionOpen;
-  $('step-count').textContent = `动作 ${t.step} · 不限步数 · ${providerLabel[t.provider] || t.provider} · ${live ? '实时画面' : '截图随步骤更新'}`;
+  $('replay-recover').disabled = busy;
+  $('step-count').textContent = `动作 ${t.step} · 不限步数 · ${providerLabel[t.provider] || t.provider} · ${live ? '实时画面' : '截图随步骤更新'}${t.context ? ` · 上下文估算 ${t.context.estimatedTokens}/${t.context.contextWindow} · 压缩 ${t.context.compactions} 次` : ''}${t.progress ? ` · ${t.progress.stages.filter(s => s.status === 'done').length}/${t.progress.stages.length} 阶段 · ${t.progress.next}` : ''}${t.metrics?.requests?.length ? ` · 上次请求 ${(t.metrics.requests.at(-1).durationMs / 1000).toFixed(1)}秒` : ''}`;
   $('page-url').textContent = t.snapshot?.url || '正在打开浏览器…';
   const screenshot = t.snapshot?.screenshot;
   if (!live && screenshot !== undefined && screenshot !== lastImage) { if (screenshot) $('screenshot').src = screenshot; else $('screenshot').removeAttribute('src'); lastImage = screenshot; }
@@ -240,7 +242,9 @@ function trashIcon() {
 }
 async function openReplay(id) {
   try {
-    replay = await api(`sessions/${id}`);
+    replay = await api('sessions/page', { id });
+    if (!replay) throw new Error('会话不存在。');
+    $('replay-more').hidden = replay.nextOffset == null;
     $('replay-banner').hidden = false; $('replay-title').textContent = `正在回放已保存的会话 · ${new Date(replay.events[0]?.time || Date.now()).toLocaleString('zh-CN', { hour12: false })}`;
     lastEventKey = ''; renderEvents(replay.events, replay.result);
     $('result-box').hidden = !replay.result; markdown($('result'), replay.result);
@@ -250,6 +254,20 @@ async function openReplay(id) {
 }
 function exitReplay() { replay = null; $('replay-banner').hidden = true; lastEventKey = ''; void loadHistory(); if (current) render(current); }
 $('replay-exit').onclick = exitReplay;
+handle('replay-more', async () => {
+  if (!replay || replay.nextOffset == null) return;
+  const id = replay.id;
+  const page = await api('sessions/page', { id, offset: replay.nextOffset });
+  if (!replay || replay.id !== id) return;
+  replay.events.push(...page.events); replay.nextOffset = page.nextOffset;
+  $('replay-more').hidden = page.nextOffset == null;
+  lastEventKey = ''; renderEvents(replay.events, replay.result);
+});
+handle('replay-recover', async () => {
+  if (!replay) return;
+  await api('sessions/recover', { id: replay.id });
+  composeNew = false; exitReplay(); toast('正在从检查点恢复并核验页面。');
+});
 $('new-task').onclick = () => {
   if (replay) exitReplay();
   if (current?.busy) { composeNew = false; render(current); toast('请先处理当前任务，或停止后创建新任务。'); return; }
@@ -280,7 +298,7 @@ $('provider').addEventListener('change', () => {
   if (defaults) { $('base-url').value = defaults.baseURL[$('provider').value] || ''; $('model').value = defaults.model[$('provider').value] || ''; }
 });
 handle('save-config', async () => {
-  const config = await api('config', { provider: $('provider').value, baseURL: $('base-url').value.trim(), model: $('model').value.trim(), apiKey: $('api-key').value.trim(), clearKey: $('clear-key').checked, effort: $('effort').value, vision: $('vision').checked, reviewerModel: $('reviewer-model').value.trim() });
+  const config = await api('config', { contextWindow: Number($('context-window').value), outputReserve: Number($('output-reserve').value), provider: $('provider').value, baseURL: $('base-url').value.trim(), model: $('model').value.trim(), apiKey: $('api-key').value.trim(), clearKey: $('clear-key').checked, effort: $('effort').value, vision: $('vision').checked, reviewerModel: $('reviewer-model').value.trim() });
   $('api-key').value = ''; $('clear-key').checked = false; showConfig(config); toast('配置已保存到本机，重启后自动恢复。');
 });
 $('browser-mode').addEventListener('change', syncBrowserMode);

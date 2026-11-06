@@ -141,7 +141,7 @@ test('extension capability negotiation rejects old workers before opening any ta
   assert.equal(changes, 2, 'CDP event forwarding must not shadow EventEmitter notifications');
 });
 
- test('providers send long conversation text without the former local character budget', async t => {
+ test('providers archive oversized text before the first request', async t => {
   const text = '中'.repeat(2000001);
   const openai = new OpenAIProvider({ baseURL: 'http://localhost', model: 'mock' }, { system: 's', tools: [] });
   openai.addUserText(text);
@@ -151,7 +151,8 @@ test('extension capability negotiation rejects old workers before opening any ta
     return { ok: true, json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: 'done' } }] }) };
   });
   await openai.step({ signal: new AbortController().signal });
-  assert.equal(sent.messages.at(-1).content[0].text, text);
+  assert.match(sent.messages.at(-1).content[0].text, /memory-1/);
+  assert.equal(openai.context.archive.get('memory-1'), text);
   const anthropic = new AnthropicProvider({ apiKey: 'test', baseURL: 'http://localhost', model: 'mock' }, { system: 's', tools: [] });
   anthropic.addUserText(text);
   t.mock.method(anthropic.client.messages, 'stream', params => {
@@ -159,7 +160,8 @@ test('extension capability negotiation rejects old workers before opening any ta
     return { finalMessage: async () => ({ content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }) };
   });
   await anthropic.step({ signal: new AbortController().signal });
-  assert.equal(sent.messages[0].content[0].text, text);
+  assert.match(sent.messages[0].content[0].text, /memory-1/);
+  assert.equal(anthropic.context.archive.get('memory-1'), text);
 });
 
 test('manual resume preserves long answers', async t => {

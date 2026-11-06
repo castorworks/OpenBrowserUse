@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, protocol, ipcMain, utilityProcess, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, protocol, ipcMain, utilityProcess, dialog, shell, session } = require('electron');
 const { join } = require('node:path');
 const { readFile, writeFile } = require('node:fs/promises');
 
@@ -37,7 +37,7 @@ function request(method, path, body) {
   });
 }
 async function api(path, body) {
-  if (typeof path !== 'string' || !/^(state|sessions(?:\/[a-f0-9-]{36})?|sessions\/delete|config|browser|login|permissions|tasks|messages|control|extension\/token)$/.test(path)) throw new Error('不支持的桌面操作。');
+  if (typeof path !== 'string' || !/^(state|sessions(?:\/[a-f0-9-]{36})?|sessions\/(?:delete|recover|page)|config|browser|login|permissions|tasks|messages|control|extension\/token)$/.test(path)) throw new Error('不支持的桌面操作。');
   const response = await request(body === undefined ? 'GET' : 'POST', `/api/${path}`, body);
   if (response.status >= 400) throw new Error(response.body?.error || '操作失败');
   return response.body;
@@ -78,7 +78,8 @@ async function createWindow() {
   if (window && !window.isDestroyed()) { window.show(); window.focus(); return; }
   window = new BrowserWindow({
     title: 'Open Browser Use', width: 1440, height: 940, minWidth: 780, minHeight: 560, show: false,
-    backgroundColor: '#f5f5f4',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#191411' : '#faf5ee',
+    icon: join(root, 'assets/icons/icon.png'),
     webPreferences: { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webviewTag: false },
   });
   window.webContents.setWindowOpenHandler(({ url }) => { void openExternal(url); return { action: 'deny' }; });
@@ -92,8 +93,10 @@ async function createWindow() {
 if (singleInstance) {
   app.on('second-instance', () => { if (backendReady) void createWindow(); });
   app.whenReady().then(async () => {
+    if (process.platform === 'darwin') app.dock.setIcon(join(root, 'assets/icons/icon.png'));
     // Only explicitly bundled frontend files are reachable through this protocol.
     const assets = {
+      '/icon.png': ['assets/icons/icon.png', 'image/png'],
       '/': ['desktop/renderer/index.html', 'text/html'], '/app.js': ['desktop/renderer/app.js', 'text/javascript'], '/style.css': ['desktop/renderer/style.css', 'text/css'],
       '/vendor/marked.js': ['node_modules/marked/lib/marked.umd.js', 'text/javascript'],
       '/vendor/purify.js': ['node_modules/dompurify/dist/purify.min.js', 'text/javascript'],
@@ -122,7 +125,8 @@ if (singleInstance) {
     ipcMain.handle('obu:export', async (event, id) => {
       trusted(event);
       if (id != null && !/^[a-f0-9-]{36}$/.test(id)) throw new Error('无效的会话编号。');
-      const task = id ? await api(`sessions/${id}`) : (await api('state')).task;
+      const currentTask = id ? null : (await api('state')).task;
+      const task = id || (currentTask && currentTask.mode !== 'demo' && !currentTask.deleted) ? await api(`sessions/${id || currentTask.id}`) : currentTask;
       if (!task) throw new Error('没有可导出的会话。');
       const data = { ...task, snapshot: task.snapshot ? { ...task.snapshot, screenshot: undefined } : null };
       const { canceled, filePath } = await dialog.showSaveDialog(window, { title: '导出会话', defaultPath: join(app.getPath('documents'), `open-browser-use-${task.id}.json`), filters: [{ name: 'JSON', extensions: ['json'] }] });

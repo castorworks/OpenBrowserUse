@@ -12,7 +12,7 @@
     <div class="topbar-left">
       <button class="icon-btn only-narrow" id="sidebar-toggle" aria-label="历史会话" title="历史会话"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg></button>
       <a class="brand" href="/" aria-label="Open Browser Use 首页">
-        <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/><path d="M10 15l4-4m0 0h-3m3 0v3"/></svg></span>
+        <span class="logo" aria-hidden="true"><img src="/icon.png" alt="" width="32" height="32"></span>
         <span class="brand-name">Open Browser Use</span>
       </a>
       <span class="brand-tag">本地</span>
@@ -37,7 +37,7 @@
       <button class="btn btn-ghost btn-sm" id="export" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12"/></svg>导出</button>
     </div>
     <div class="chat-scroll" id="chat-scroll">
-      <div id="replay-banner" class="banner" hidden><span id="replay-title"></span><button class="btn btn-ghost btn-sm" id="replay-exit">返回当前任务</button></div>
+      <div id="replay-banner" class="banner" hidden><span id="replay-title"></span><button class="btn btn-ghost btn-sm" id="replay-more" hidden>加载更多记录</button><button class="btn btn-ghost btn-sm" id="replay-recover">从检查点恢复</button><button class="btn btn-ghost btn-sm" id="replay-exit">返回当前任务</button></div>
       <section class="welcome" id="welcome">
         <h2>把目标交给浏览器</h2>
         <p>描述你想完成的事。代理会读取页面、点击和输入，每一步都显示在这里，你可以随时确认、补充或接管。</p>
@@ -127,6 +127,8 @@
     <div class="field"><label for="model">模型名</label><input id="model" placeholder="例如 claude-opus-5-5" autocomplete="off"></div>
     <div class="field"><label for="api-key">API Key <span class="muted" id="key-status"></span></label><input id="api-key" type="password" placeholder="保存在本机，重启后自动恢复" autocomplete="off">
       <label class="check"><input id="clear-key" type="checkbox">清除已保存的 Key</label></div>
+    <div class="field"><label for="context-window">上下文窗口（token，按服务商实际容量填写）</label><input id="context-window" type="number" min="16000" max="2000000" step="1000" value="128000"></div>
+    <div class="field"><label for="output-reserve">输出预留（token）</label><input id="output-reserve" type="number" min="1000" max="64000" step="1000" value="16000"></div>
     <div class="field provider-effort"><label for="effort">思考强度（effort）</label><select id="effort"><option value="low">low</option><option value="medium">medium</option><option value="high" selected>high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div>
     <label class="check provider-openai"><input id="vision" type="checkbox">发送截图（DeepSeek 图像识别使用 deepseek-flash）</label>
     <div class="field"><label for="reviewer-model">审查模型 <span class="muted">（自动模式，可选）</span></label><input id="reviewer-model" placeholder="留空：Claude 用 claude-haiku-5-5，其他服务用主模型" autocomplete="off"></div>

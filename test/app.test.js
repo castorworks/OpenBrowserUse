@@ -514,9 +514,9 @@ test('ask_user hands off to the person and a rejected action is reported to the 
   await settle();
 });
 
-test('model HTTP errors stop after three consecutive failures without leaking the body', async () => {
-  mockMode = 'error'; const beforeRequests = requests; await start(); await until(() => !agent.busy);
-  assert.equal(agent.task.status, 'failed'); assert.equal(requests - beforeRequests, 3);
+test('model HTTP errors back off and stop after six consecutive failures without leaking the body', async () => {
+  mockMode = 'error'; const beforeRequests = requests; await start(); await until(() => !agent.busy, 45000);
+  assert.equal(agent.task.status, 'failed'); assert.equal(requests - beforeRequests, 6);
   assert.ok(!agent.task.result.includes('secret-echo'));
   await settle();
 });

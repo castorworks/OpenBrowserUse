@@ -112,11 +112,26 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await api('messages', { text: '继续确认' });
   await until(async () => !(await api('state')).busy);
   assert.ok(requests.length >= 3);
+  const savedTaskId = (await api('state')).task.id;
+  const historyPage = await api('sessions/page', { id: savedTaskId, limit: 2 });
+  assert.equal(historyPage.events.length, 2);
+  assert.equal(historyPage.nextOffset, 2);
+  await page.evaluate(id => openReplay(id), savedTaskId);
+  await page.locator('#replay-recover').click();
+  await until(async () => { const s = await api('state'); return requests.some(r => JSON.stringify(r.messages).includes('恢复检查点')) && s.task?.id === savedTaskId && !s.busy && s.task.status === 'done'; });
+  assert.ok(requests.some(r => JSON.stringify(r.messages).includes('恢复检查点')));
+  assert.ok(requests.some(r => JSON.stringify(r.messages).includes('继续确认')));
+  await page.waitForFunction(() => document.getElementById('replay-banner').hidden);
+
   await page.waitForFunction(() => document.querySelector('#model-badge')?.textContent === 'desktop-test');
   await page.waitForFunction(() => { const img = document.querySelector('#screenshot'); return !img.hidden && img.naturalWidth > 0; });
   if (process.env.OBU_DESKTOP_SCREENSHOT) {
     await mkdir(dirname(process.env.OBU_DESKTOP_SCREENSHOT), { recursive: true });
-    await page.screenshot({ path: process.env.OBU_DESKTOP_SCREENSHOT });
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.screenshot({ path: process.env.OBU_DESKTOP_SCREENSHOT, animations: 'disabled' });
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.screenshot({ path: process.env.OBU_DESKTOP_SCREENSHOT.replace(/\.png$/, '-dark.png'), animations: 'disabled' });
+    await page.emulateMedia({ colorScheme: 'light' });
   }
   const result = await page.evaluate(() => {
     const events = [{ kind: 'assistant', time: 1, message: '**概览**\n\n| 指标 | 数值 |\n|---|---|\n| Assets | 8 |\n\n<img src=x onerror="window.injected=true"><script>window.injected=true</script>' }, { kind: 'action', time: 2, tool: 'computer', message: '截图', state: 'running' }];

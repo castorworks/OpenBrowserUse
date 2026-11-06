@@ -1,27 +1,27 @@
 /* Open Browser Use workbench. Tokens first; light by default, dark via prefers-color-scheme. */
 :root {
-  --bg: #f6f6f7;
-  --panel: #ffffff;
-  --panel-2: #fafafa;
-  --hover: #f1f1f3;
-  --border: #e4e4e7;
-  --border-strong: #d4d4d8;
-  --text: #18181b;
-  --text-2: #3f3f46;
-  --muted: #71717a;
-  --faint: #a1a1aa;
-  --accent: #1f6f5c;
-  --accent-hover: #175747;
-  --accent-text: #ffffff;
-  --accent-soft: #e8f3ef;
-  --accent-ring: #1f6f5c40;
+  --bg: #faf5ee;
+  --panel: #fffaf3;
+  --panel-2: #f5ede3;
+  --hover: #f1e3d6;
+  --border: #e7d9cb;
+  --border-strong: #d5c1ae;
+  --text: #30231d;
+  --text-2: #594237;
+  --muted: #7e6759;
+  --faint: #957e6f;
+  --accent: #b9471c;
+  --accent-hover: #993715;
+  --accent-text: #fff9f0;
+  --accent-soft: #fce8da;
+  --accent-ring: #b9471c40;
   --ok: #15803d;
   --warn: #b45309;
   --warn-soft: #fef6e7;
   --danger: #dc2626;
   --danger-soft: #fdecec;
-  --user-bubble: #eef2f6;
-  --viewport-bg: #f0f0f2;
+  --user-bubble: #fff0e3;
+  --viewport-bg: #eee3d7;
   --shadow: 0 1px 2px #0000000d, 0 1px 1px #00000008;
   --shadow-lg: 0 12px 40px #00000024;
   --radius: 10px;
@@ -36,28 +36,28 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e0f11;
-    --panel: #16171a;
-    --panel-2: #1b1c20;
-    --hover: #222328;
-    --border: #2a2b31;
-    --border-strong: #3a3b42;
-    --text: #ececef;
-    --text-2: #d4d4d8;
-    --muted: #a1a1aa;
-    --faint: #6b6b74;
-    --accent: #3fae8f;
-    --accent-hover: #4fc19f;
-    --accent-text: #08130f;
-    --accent-soft: #15302a;
-    --accent-ring: #3fae8f50;
+    --bg: #191411;
+    --panel: #211a16;
+    --panel-2: #29201b;
+    --hover: #35281f;
+    --border: #443328;
+    --border-strong: #614a3b;
+    --text: #fff4e8;
+    --text-2: #e5cdbc;
+    --muted: #bca28f;
+    --faint: #ac9180;
+    --accent: #ff995f;
+    --accent-hover: #ffb383;
+    --accent-text: #28170e;
+    --accent-soft: #45281a;
+    --accent-ring: #ff995f50;
     --ok: #4ade80;
     --warn: #f0b04a;
     --warn-soft: #2d2414;
     --danger: #f87171;
     --danger-soft: #2f1717;
-    --user-bubble: #23262d;
-    --viewport-bg: #0b0c0e;
+    --user-bubble: #38271d;
+    --viewport-bg: #140f0c;
     --shadow: 0 1px 2px #00000066;
     --shadow-lg: 0 12px 40px #000000a0;
   }
@@ -125,8 +125,8 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .topbar { grid-area: top; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px 0 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand { display: flex; align-items: center; gap: 9px; color: var(--text); text-decoration: none; }
-.logo { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--accent-text); }
-.logo svg { width: 18px; height: 18px; stroke-width: 1.8; }
+.logo { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: transparent; }
+.logo img { display: block; width: 32px; height: 32px; }
 .brand-name { font-weight: 650; letter-spacing: -.2px; white-space: nowrap; }
 .brand-tag { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted); }
 .conn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }

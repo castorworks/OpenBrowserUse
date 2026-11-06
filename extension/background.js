@@ -3,7 +3,7 @@
 // The user's own tabs are never attached, reported or closed.
 
 const DEFAULTS = { server: 'http://127.0.0.1:4318', token: '' };
-const GROUP = { title: 'Open Browser Use', color: 'green' };
+const GROUP = { title: 'Open Browser Use', color: 'orange' };
 const state = { status: 'disconnected', error: '' };
 const agentTabs = new Set();   // tabs created for the agent (and popups they opened)
 const attached = new Set();    // agent tabs with the debugger attached

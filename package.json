@@ -11,7 +11,8 @@
     "test:desktop": "node --test test/desktop.integration.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --publish never",
-    "release:mac": "node scripts/release-mac.mjs"
+    "release:mac": "node scripts/release-mac.mjs",
+    "icons": "node scripts/build-icons.mjs"
   },
   "engines": {
     "node": ">=22.12"
@@ -46,7 +47,8 @@
       "lib/**/*",
       "bin/**/*",
       "package.json",
-      "assets/**/*"
+      "assets/**/*",
+      "!assets/icons/*concept*.png"
     ],
     "asarUnpack": [
       "node_modules/playwright-core/**/*",
@@ -64,18 +66,21 @@
         "dmg",
         "zip"
       ],
-      "identity": null
+      "identity": null,
+      "icon": "assets/icons/icon.icns"
     },
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "assets/icons/icon.ico"
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "icon": "assets/icons/icon.png"
     },
     "nsis": {
       "oneClick": false,
