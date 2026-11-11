@@ -26,21 +26,27 @@
 
   <aside class="sidebar" id="sidebar">
     <button class="btn btn-primary btn-block" id="new-task"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>新任务</button>
+    <label class="history-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="8" r="5"/><path d="M12 12l5 5"/></svg><input id="history-search" type="search" placeholder="搜索会话" aria-label="搜索历史会话"></label>
     <div class="sidebar-label"><span>历史会话</span><span id="history-count"></span></div>
     <div id="history-list" class="history-list"><p class="muted small">还没有保存的会话。</p></div>
-    <div class="sidebar-foot">v0.3.1 · 数据只保存在本机</div>
+    <div class="sidebar-foot">会话记录保存在本机</div>
   </aside>
 
   <main class="chat">
     <div class="pane-head">
-      <h1 id="chat-title">新任务</h1>
+      <div class="pane-heading"><span class="eyebrow">任务工作区</span><h1 id="chat-title">新任务</h1></div>
       <button class="btn btn-ghost btn-sm" id="export" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12"/></svg>导出</button>
+    </div>
+    <div id="task-context" class="task-context" hidden>
+      <div><strong id="context-title"></strong><p id="context-description"></p></div>
+      <div class="context-actions"><button class="btn btn-sm" id="return-current">返回当前任务</button><button class="btn btn-sm" id="context-close" hidden>关闭当前会话</button></div>
     </div>
     <div class="chat-scroll" id="chat-scroll">
       <div id="replay-banner" class="banner" hidden><span id="replay-title"></span><button class="btn btn-ghost btn-sm" id="replay-more" hidden>加载更多记录</button><button class="btn btn-ghost btn-sm" id="replay-recover">从检查点恢复</button><button class="btn btn-ghost btn-sm" id="replay-exit">返回当前任务</button></div>
       <section class="welcome" id="welcome">
-        <h2>把目标交给浏览器</h2>
-        <p>描述你想完成的事。代理会读取页面、点击和输入，每一步都显示在这里，你可以随时确认、补充或接管。</p>
+        <div class="welcome-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="3" y="4" width="26" height="23" rx="5"/><path d="M3 11h26M10 17l4 3-4 3M18 23h5"/></svg></div>
+        <span class="eyebrow">从一个目标开始</span><h2>今天，让浏览器帮你做什么？</h2>
+        <p>交代目标和网址，随时查看过程、补充要求或暂停接管。</p>
         <div class="examples">
           <button class="example" data-goal="打开 https://example.com，总结它的主要内容，并附上来源链接。"><strong>网页总结</strong><span>阅读页面并整理要点</span></button>
           <button class="example" data-goal="打开 https://playwright.dev，查找支持哪些浏览器，并用中文总结，附上来源。"><strong>文档检索</strong><span>在文档站查找并汇总信息</span></button>
@@ -53,8 +59,9 @@
 
     <section class="decision" id="decision" hidden>
       <div class="decision-head"><span class="decision-icon" aria-hidden="true">!</span><h2 id="decision-title">确认下一步</h2></div>
-      <pre id="decision-detail"></pre>
+      <p class="decision-caption">代理已暂停，等待你的决定。</p><pre id="decision-detail"></pre>
       <textarea id="user-answer" placeholder="补充要求，或说明已在浏览器中完成的操作" rows="2" hidden></textarea>
+      <p class="inline-error" id="decision-error" role="alert" hidden></p>
       <div class="button-row">
         <button class="btn btn-primary" id="approve">允许这一步</button>
         <button class="btn" id="approve-site" hidden>始终允许此网站</button>
@@ -65,14 +72,18 @@
     </section>
 
     <div class="composer" id="task-composer">
-      <label class="sr-only" for="goal">你希望完成什么？</label>
+      <label class="composer-label" for="goal">任务目标</label>
       <textarea id="goal" rows="2" placeholder="描述目标，例如：打开 https://playwright.dev，找到浏览器支持列表，并用中文整理结果。"></textarea>
-      <div class="composer-row">
-        <label class="field-inline" title="权限模式"><span class="sr-only">权限</span><select id="permission-mode"><option value="ask">逐步确认</option><option value="auto">自动 · 审查风险</option><option value="skip" selected>直接执行 · 无限制</option></select></label>
-        <span class="field-inline steps">不限步数</span>
+      <div class="composer-options">
+        <label class="field-inline" title="权限模式"><span class="sr-only">权限</span><select id="permission-mode"><option value="ask">逐步确认</option><option value="auto">自动 · 审查风险</option><option value="skip" selected>直接执行</option></select></label>
+        </div>
+      <p class="inline-error" id="composer-error" role="alert" hidden></p>
+      <div class="composer-row composer-submit"><span class="keyboard-hint" id="submit-hint">Enter 开始 · Shift + Enter 换行</span>
+      <div class="submit-actions">
+        <button class="btn" id="enqueue">加入队列</button>
         <button class="btn btn-primary" id="run">开始执行<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10h10m0 0l-4-4m4 4l-4 4"/></svg></button>
-      </div>
-      <p class="hint" id="mode-hint">直接执行所有浏览器工具；不进行网站、字段或脚本权限拦截。</p>
+      </div></div>
+      <p class="hint" id="mode-hint">直接执行操作，无需逐步确认。</p>
     </div>
 
     <div class="composer" id="follow-up-box" hidden>
@@ -87,9 +98,10 @@
 
   <section class="browser" aria-label="浏览器视图">
     <div class="pane-head">
-      <div class="address"><span class="lock" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="5" y="9" width="10" height="8" rx="2"/><path d="M7 9V7a3 3 0 016 0v2"/></svg></span><span id="page-url">等待新任务</span></div>
+      <span class="browser-title">浏览器</span><div class="address"><span class="lock" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="5" y="9" width="10" height="8" rx="2"/><path d="M7 9V7a3 3 0 016 0v2"/></svg></span><span id="page-url">等待新任务</span></div>
       <span id="status" class="status-pill">就绪</span>
     </div>
+    <div class="browser-context"><span id="browser-context-label">准备就绪</span><span id="frame-label">等待启动</span></div>
     <div class="viewport" id="viewport">
       <div class="empty-state" id="empty-state">
         <div class="empty-icon" aria-hidden="true"><svg viewBox="0 0 48 48"><rect x="6" y="9" width="36" height="30" rx="5"/><path d="M6 17h36"/><circle cx="11" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><circle cx="19" cy="13" r="1"/></svg></div>
@@ -97,28 +109,40 @@
         <p>开始任务后，这里实时显示代理正在操作的标签页。</p>
       </div>
       <img id="screenshot" alt="代理正在操作的页面" hidden>
+      <div id="agent-pointer-layer" aria-hidden="true" hidden>
+        <svg id="agent-drag-trail"><path id="agent-drag-path"/></svg>
+        <div id="agent-pointer"><span class="pointer-ring"></span><svg class="pointer-arrow" viewBox="0 0 28 32"><path d="M3 2l20 15-10 2-5 10z"/></svg><span id="agent-pointer-label">代理</span></div>
+      </div>
     </div>
     <div class="browser-foot">
-      <span id="step-count" class="muted">等待观察页面</span>
+      <div class="browser-progress"><span id="step-count" class="muted">等待观察页面</span><details class="run-details"><summary>执行详情</summary><div id="run-details-content"></div></details></div>
       <div class="controls">
         <button class="btn btn-sm" id="pause" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4v12M13 4v12"/></svg>暂停 / 接管</button>
         <button class="btn btn-sm" id="resume" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l10 6-10 6z"/></svg>继续执行</button>
         <button class="btn btn-sm btn-danger-ghost" id="stop" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1.5"/></svg>停止</button>
       </div>
     </div>
+    <details class="queue-panel" id="queue-panel">
+      <summary><span>任务队列 <span id="queue-count">0</span></span><span class="queue-summary-hint" id="queue-summary-hint">按顺序执行</span></summary>
+      <div class="queue-filters" role="group" aria-label="队列筛选"><button id="queue-filter-active" aria-pressed="true">进行中</button><button id="queue-filter-all" aria-pressed="false">全部</button></div>
+      <button class="btn btn-sm" id="queue-release" hidden>关闭闲置会话，继续队列</button>
+      <p class="hint" id="queue-hint">按提交顺序执行，完成后自动关闭浏览器。</p>
+      <div id="queue-list"></div>
+    </details>
   </section>
 </div>
 
 <div class="backdrop" id="backdrop" hidden></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
   <div class="drawer-head">
-    <h2 id="drawer-title">设置</h2>
+    <div><span class="eyebrow">工作台偏好</span><h2 id="drawer-title">设置</h2></div>
     <button class="icon-btn" id="drawer-close" aria-label="关闭设置"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
   </div>
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="settings" class="active">模型</button>
-    <button role="tab" data-tab="browser-settings">浏览器 <span class="tab-badge" id="browser-badge">独立会话</span></button>
+    <button role="tab" data-tab="browser-settings">浏览器 <span class="sr-only" id="browser-badge">独立会话</span></button>
     <button role="tab" data-tab="permissions-panel">网站权限</button>
+    <button role="tab" data-tab="lifecycle-panel">会话与队列</button>
   </nav>
 
   <section class="drawer-panel" id="settings" role="tabpanel">
@@ -160,7 +184,13 @@
     <div class="field"><label for="blocked-sites">受保护网站 <span class="muted">（仅逐步确认/自动审查模式生效；每行一个域名）</span></label><textarea id="blocked-sites" rows="8"></textarea></div>
     <button class="btn btn-primary btn-block" id="save-blocked">保存受保护网站</button>
   </section>
+  <section class="drawer-panel" id="lifecycle-panel" role="tabpanel" hidden>
+    <div class="field"><label for="idle-timeout">闲置浏览器自动关闭（秒）</label><input id="idle-timeout" type="number" min="0" max="86400" value="900"><p class="hint">0 表示不自动关闭。执行中、暂停和等待确认不计为闲置。</p></div>
+    <div class="field"><label for="history-retention">历史保留天数</label><input id="history-retention" type="number" min="0" max="3650" value="0"><p class="hint">0 表示永久保留。设置天数后，过期的已关闭会话及其记录将自动删除。</p></div>
+    <div class="field"><label for="queue-capacity">最多等待任务数</label><input id="queue-capacity" type="number" min="1" max="1000" value="100"></div>
+    <button class="btn btn-primary btn-block" id="save-lifecycle">保存会话与队列设置</button>
+  </section>
 </aside>
-<div id="toast" role="status" hidden></div>
+<div id="toast" role="status" hidden><span id="toast-message"></span><button id="toast-dismiss" aria-label="关闭通知">×</button></div>
 </body>
 </html>

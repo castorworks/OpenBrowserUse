@@ -37,7 +37,7 @@ function request(method, path, body) {
   });
 }
 async function api(path, body) {
-  if (typeof path !== 'string' || !/^(state|sessions(?:\/[a-f0-9-]{36})?|sessions\/(?:delete|recover|page)|config|browser|login|permissions|tasks|messages|control|extension\/token)$/.test(path)) throw new Error('不支持的桌面操作。');
+  if (typeof path !== 'string' || !/^(state|sessions(?:\/[a-f0-9-]{36})?|sessions\/(?:delete|recover|page)|config|browser|login|permissions|tasks|messages|control|extension\/token|jobs(?:\/[a-f0-9-]{36}\/cancel)?|lifecycle)$/.test(path)) throw new Error('不支持的桌面操作。');
   const response = await request(body === undefined ? 'GET' : 'POST', `/api/${path}`, body);
   if (response.status >= 400) throw new Error(response.body?.error || '操作失败');
   return response.body;

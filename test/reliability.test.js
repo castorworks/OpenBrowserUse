@@ -170,6 +170,7 @@ test('manual resume preserves long answers', async t => {
   const answer = '中'.repeat(10000);
   let resumed;
   a.resolveGate = value => { resumed = value; };
-  a.control('resume', answer);
+  a.task.pending = { id: crypto.randomUUID() };
+  a.control('resume', answer, a.task.pending.id);
   assert.equal(resumed.answer, answer);
 });

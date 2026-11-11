@@ -12,7 +12,8 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder --publish never",
     "release:mac": "node scripts/release-mac.mjs",
-    "icons": "node scripts/build-icons.mjs"
+    "icons": "node scripts/build-icons.mjs",
+    "api": "node bin/server.js"
   },
   "engines": {
     "node": ">=22.12"
@@ -30,6 +31,8 @@
     "openbrowseruse": "bin/mcp.js"
   },
   "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "electron": "^45.2.2",
     "electron-builder": "^26.18.0"
   },

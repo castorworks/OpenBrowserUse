@@ -150,12 +150,49 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await page.setViewportSize({ width: 1440, height: 1000 });
   const sessions = (await api('sessions')).sessions;
   assert.equal(sessions.length, 1);
+  await page.locator('#history-search').fill('不存在的会话');
+  assert.match(await page.locator('#history-list').textContent(), /没有/);
+  await page.locator('#history-search').fill('');
   assert.ok(!JSON.stringify(await api('state')).includes('desktop-fixture-key'));
   const exportPath = join(dir, 'export.json');
   await desktop.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, exportPath);
   await page.evaluate(id => window.desktop.exportSession(id), sessions[0].id);
   assert.match(JSON.parse(await readFile(exportPath, 'utf8')).result, /桌面模型测试完成/);
   assert.ok(!(await readFile(exportPath, 'utf8')).includes('desktop-fixture-key'));
+  // Desktop queue/lifecycle controls use the same application service as HTTP.
+  await page.evaluate(() => openDrawer('lifecycle-panel'));
+  assert.equal(await page.locator('.app').evaluate(node => node.inert), true, 'settings prevent interacting with the background');
+  await page.locator('#idle-timeout').fill('1200');
+  await page.locator('#history-retention').fill('0');
+  await page.locator('#queue-capacity').fill('20');
+  await page.locator('#save-lifecycle').click();
+  await until(async () => (await api('lifecycle')).idle_timeout_seconds === 1200);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.app').evaluate(node => node.inert), false);
+  await page.locator('#new-task').click();
+  await page.locator('#goal').fill('稍后执行的桌面任务');
+  assert.equal(await page.locator('#task-context').isVisible(), true);
+  assert.equal(await page.locator('#run').isDisabled(), true, 'an open session directs a new task to the queue');
+  assert.equal(await page.locator('#enqueue').isEnabled(), true);
+  await page.locator('#enqueue').click();
+  await page.waitForFunction(() => document.querySelector('#queue-count').textContent === '1');
+  assert.match(await page.locator('#queue-list').textContent(), /稍后执行的桌面任务/);
+  await page.locator('#queue-list button').click();
+  await page.waitForFunction(() => document.querySelector('#queue-count').textContent === '0');
+  assert.equal((await api('jobs')).data[0].status, 'cancelled');
+  await page.evaluate(() => {
+    showPointer({ visible: true, session_id: current.task.id, action: 'left_click_drag', phase: 'move', coordinate: [410, 240], start_coordinate: [220, 160], viewport: { width: 1280, height: 800 }, at: new Date().toISOString() });
+  });
+  assert.equal(await page.locator('#agent-pointer-layer').isVisible(), true);
+  assert.match(await page.locator('#agent-drag-path').getAttribute('d'), /^M .* L /);
+  await page.setViewportSize({ width: 1200, height: 820 });
+  assert.equal(await page.locator('#agent-pointer-layer').isVisible(), true);
+  if (process.env.OBU_POINTER_SCREENSHOT) {
+    await mkdir(dirname(process.env.OBU_POINTER_SCREENSHOT), { recursive: true });
+    await page.screenshot({ path: process.env.OBU_POINTER_SCREENSHOT });
+  }
+  await page.evaluate(() => showPointer({ visible: false }));
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await api('control', { command: 'stop' });
   await until(async () => !(await api('state')).task.sessionOpen);
 

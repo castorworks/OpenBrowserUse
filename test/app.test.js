@@ -28,7 +28,7 @@ const { agent } = api;
 let server, openaiServer, anthropicServer, siteServer, browser, mockMode = 'normal', reviewerVerdict = 'safe', reviewerCalls = 0, requests = 0, requestAuth, lastOpenAIBody, anthropicRequests = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(check, timeout = 25000) { const start = Date.now(); while (!check()) { if (Date.now() - start > timeout) throw new Error(`Timed out. State: ${agent.task?.status}, ${agent.task?.result}, ${JSON.stringify(agent.task?.events.slice(-3))}`); await sleep(60); } }
-const post = (path, body) => api.request('POST', '/api/' + path, body);
+const post = (path, body) => api.request('POST', '/api/' + path, ['control', 'messages'].includes(path) ? { interactionId: agent.task?.pending?.id, ...body } : body);
 const get = path => api.request('GET', '/api/' + path);
 async function configureOpenAI() { return post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/v1`, model: 'test-model', apiKey: 'test-secret', vision: false }); }
 async function start(extra = {}) { return post('tasks', { goal: '搜索键盘并读取价格', startURL: origin + '/demo', maxSteps: 20, permissionMode: 'ask', ...extra }); }

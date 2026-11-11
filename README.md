@@ -1,6 +1,6 @@
 # Open Browser Use
 
-一个本地运行的 AI 浏览器代理。输入自然语言目标，模型像 Claude in Chrome 一样通过工具调用读取页面、点击、输入、切换标签页，界面显示截图、每一步工具调用和结果；完成后可以在同一个浏览器里继续对话。默认使用 Anthropic Claude（`claude-opus-5-5`），也支持 DeepSeek 和兼容 OpenAI 的 Chat Completions 服务（需支持 function calling）。
+一个本地运行的 AI 浏览器代理。输入自然语言目标，模型像 Claude in Chrome 一样通过工具调用读取页面、点击、输入、切换标签页，界面显示截图、每一步工具调用和结果；完成后可以在同一个浏览器里继续对话。支持实时代理光标、点击与拖动反馈、串行任务队列及会话自动清理。默认使用 Anthropic Claude（`claude-opus-5-5`），也支持 DeepSeek 和兼容 OpenAI 的 Chat Completions 服务（需支持 function calling）。
 
 ## 开始使用
 
@@ -13,7 +13,7 @@ npm start
 
 这会打开 Electron 桌面工作台并自动启动独立后台。点击“本地演示”可以无需 Key 验证真实浏览器和工具循环。**演示使用固定脚本，不代表模型智能。**
 
-桌面窗口加载本地资源，通过受限 IPC 调用独立 Node.js 后台；浏览器自动化与模型调用不会运行在界面进程里。工作台仅提供 Electron 桌面入口，已移除网页启动方式、HTTP 管理 API 和 SSE。扩展端口只支持经过认证的 WebSocket 中继，普通 HTTP 请求返回 404。演示商店随应用打包，在浏览器中加载内嵌资源，无需本地网站服务。
+桌面窗口加载本地资源，通过受限 IPC 调用独立 Node.js 后台；浏览器自动化与模型调用不会运行在界面进程里。工作台提供 Electron 桌面入口，不提供网页界面。可选的标准 HTTP API 通过独立端口提供，默认关闭，见 [API 使用说明](docs/api.md)。扩展端口只支持经过认证的 WebSocket 中继，普通 HTTP 请求返回 404。演示商店随应用打包，在浏览器中加载内嵌资源，无需本地网站服务。
 
 - 双击打包应用或运行 `npm start` 即可使用。macOS 关闭窗口后后台继续运行，可从 Dock / 菜单栏重新打开；通过菜单“退出”或 Cmd+Q 会停止任务、关闭代理浏览器并释放中继。Windows / Linux 关闭最后一个窗口会退出应用。
 - 应用只启动一个桌面实例；重复启动会聚焦已有窗口。后台异常退出时工作台会提示重新打开应用，不会自动重跑任务。
@@ -107,6 +107,8 @@ npm run test:desktop    # 真实 Electron + Chrome 扩展集成测试
 
 ## 给 Claude Code / Codex 使用（MCP）
 
+面向外部业务系统，现已提供可选的 HTTP API，见 [使用说明](docs/api.md) 和 [OpenAPI 契约](docs/openapi.json)。它负责自然语言任务的执行管理；下述 stdio MCP 提供底层浏览器工具。
+
 `bin/mcp.js` 是一个 stdio MCP 服务器，把同一套浏览器工具（read_page、find、get_page_text、computer、navigate、tabs、form_input、控制台/网络、javascript）提供给编程代理，例如让 Claude Code 检查本机开发服务器。不需要启动工作台，也不使用模型 Key：决策由调用它的代理完成。
 
 Claude Code：
@@ -145,6 +147,13 @@ npm start
 desktop/                 Electron 主进程、本地工作台桥接和独立后台入口
 lib/application.js       桌面后台的配置、任务和会话接口
 lib/runtime.js           本机监听、端口分配、中继和退出清理
+lib/http-api.js          HTTP API、持久化资源和幂等请求
+lib/api-events.js        持久化事件、SSE 回放及断线重连
+lib/api-lifecycle.js     FIFO 队列、闲置关闭和历史清理
+lib/queue-payload.js     待执行任务负载加密
+lib/runs.js              每轮独立执行记录
+lib/runtime-lock.js      数据目录进程锁
+bin/server.js            可选无界面 HTTP API 入口
 bin/mcp.js               MCP 服务器入口（stdio），实现在 lib/mcp.js
 lib/agent.js             工具调用循环、确认、暂停/恢复、追问、执行中补充、实时画面、停止
 lib/sessions.js          会话保存（node:sqlite）
@@ -198,7 +207,7 @@ npm test
 
 扩展测试需要能加载解压扩展的 Chromium / Chrome for Testing（正式版 Chrome 已不支持 `--load-extension`）：默认使用 Playwright 自带或缓存中的 Chromium，也可用 `OBU_TEST_CHROMIUM=<可执行文件路径>` 指定；找不到时跳过。
 
-尚未用真实 Anthropic / OpenAI Key 做端到端验证。
+HTTP API 的接口契约和真实浏览器 + 模拟模型集成测试包含在 `npm test` 中。已用本机配置的真实 DeepSeek 完成 HTTP API 公开页面读取、续聊、历史结果保留及关闭会话验证；尚未用真实 Anthropic / OpenAI Key 做端到端验证。
 
 ## 当前边界
 
@@ -207,6 +216,6 @@ npm test
 - 模型可见任务、网页文字、截图和工具结果。请按所选服务商的数据处理方式选择浏览内容。
 - 逐步确认模式可以控制每一步；自动模式依赖规则和审查模型，不能保证识别全部敏感操作；直接执行模式不做本地权限拦截。导航本身也可能引发站点行为。
 - 除工作台管理接口外，浏览器不限制目标地址。工作台 API 仍验证请求来源并校验参数；没有账号体系，不适合直接暴露到公网。
-- 单任务；没有账号体系或生产部署配置。模型的文字说明按轮更新，尚未逐字流式显示。node:sqlite 在 Node 22 中仍是实验特性（它的启动警告已被屏蔽）。
+- 单浏览器执行，支持 FIFO 任务队列；没有账号体系或生产部署配置。模型的文字说明按轮更新，尚未逐字流式显示。node:sqlite 在 Node 22 中仍是实验特性（它的启动警告已被屏蔽）。
 
 模型设置在关闭当前浏览器会话后才能修改，续聊使用原会话的模型。界面中的“本轮结束”只表示模型回答完毕，不表示业务结果已验证；导出记录使用 outcome=unverified 标识。JavaScript 工具有 10 秒执行期限，暂停会取消脚本等待并尝试终止执行；取消后需重新观察页面，已产生的副作用不会撤销。

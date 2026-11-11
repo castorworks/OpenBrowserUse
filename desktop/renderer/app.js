@@ -2,8 +2,11 @@ const $ = id => document.getElementById(id);
 let current = null, configured = false, lastImage = null, lastEventKey = '', lastTask = null, lastFrameAt = 0, replay = null, lastStatus = '', composeNew = false;
 const states = { starting: '启动浏览器', running: '执行中', pausing: '正在暂停', paused: '已暂停 · 可接管', approval: '等待确认', waiting_user: '需要你的帮助', stopping: '正在停止', stopped: '已停止', done: '本轮结束 · 结果待验证', failed: '执行失败' };
 const providerLabel = { anthropic: 'Claude', deepseek: 'DeepSeek', openai: 'OpenAI 兼容', demo: '固定脚本演示' };
-function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').hidden = true, 6500); }
-const api = (path, data) => window.desktop.request(path, data);
+function toast(message) { $('toast-message').textContent = message; $('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').hidden = true, 6500); }
+$('toast-dismiss').onclick = () => { $('toast').hidden = true; clearTimeout(toast.timer); };
+const pendingButtons = new Set();
+let historyCache = [], queueFilter = 'active';
+const api = (path, data) => window.desktop.request(path, data && ['control', 'messages'].includes(path) ? { ...data, interactionId: current?.task?.pending?.id } : data);
 const providerHints = {
   anthropic: { base: '留空使用 Anthropic 官方地址', hint: '（可选）', model: '例如 claude-opus-5-5' },
   deepseek: { base: 'https://api.deepseek.com', hint: '（默认官方地址）', model: '图像识别使用 deepseek-flash' },
@@ -53,7 +56,7 @@ function pendingText(p) {
 const modeHints = {
   ask: '每次点击、输入前都请你确认；首次访问新网站时也会询问。',
   auto: '规则和审查模型判断风险：安全的操作直接执行，购买、发送、删除等有后果的操作会请你确认。',
-  skip: '直接执行所有浏览器工具；不进行网站、字段或脚本权限拦截。',
+  skip: '直接执行操作，无需逐步确认。',
 };
 let lastGrants = '';
 function renderGrants(list) {
@@ -127,6 +130,85 @@ function showFrame(data) {
   $('screenshot').src = `data:image/jpeg;base64,${data}`; lastImage = 'frame';
   $('screenshot').hidden = false; $('empty-state').hidden = true;
 }
+let pointerState = null, pointerTimer, lastPointerPulse = '';
+const pointerNames = { left_click: '点击', right_click: '右键点击', double_click: '双击', triple_click: '三击', hover: '移动', left_click_drag: '拖动', type: '输入', key: '按键', form_input: '填写', scroll: '滚动' };
+function positionPointer() {
+  const layer = $('agent-pointer-layer'), p = pointerState, img = $('screenshot');
+  if (!p?.visible || !p.coordinate || img.hidden || p.session_id !== current?.task?.id || replay) { layer.hidden = true; return; }
+  const box = $('viewport').getBoundingClientRect(), v = p.viewport;
+  if (!v?.width || !v?.height || !box.width || !box.height) return;
+  const scale = Math.min(box.width / v.width, box.height / v.height);
+  const offset = [(box.width - v.width * scale) / 2, (box.height - v.height * scale) / 2];
+  const point = xy => xy.map((value, index) => offset[index] + value * scale);
+  const [x, y] = point(p.coordinate);
+  layer.hidden = false; $('agent-pointer').classList.toggle('dragging', p.action === 'left_click_drag'); $('agent-pointer').style.transform = `translate(${x}px,${y}px)`;
+  $('agent-pointer-label').textContent = `代理 · ${p.phase === 'error' ? '操作失败' : pointerNames[p.action] || '操作'}`;
+  $('agent-pointer').classList.toggle('error', p.phase === 'error');
+  const dragging = p.action === 'left_click_drag' && p.start_coordinate;
+  $('agent-drag-path').setAttribute('d', dragging ? `M ${point(p.start_coordinate).join(' ')} L ${x} ${y}` : '');
+}
+function showPointer(data) {
+  pointerState = data; clearTimeout(pointerTimer);
+  positionPointer();
+  const pulse = `${data.at}:${data.action}`;
+  if (data.phase === 'start' && /click/.test(data.action || '') && data.action !== 'left_click_drag' && pulse !== lastPointerPulse) {
+    lastPointerPulse = pulse;
+    const p = $('agent-pointer'); p.classList.remove('click'); void p.offsetWidth; p.classList.add('click');
+  }
+  pointerTimer = setTimeout(() => { pointerState = null; positionPointer(); }, 2500);
+}
+new ResizeObserver(positionPointer).observe($('viewport'));
+$('screenshot').addEventListener('load', positionPointer);
+function renderQueue(queue) {
+  if (!queue) return;
+  const jobs = queue.jobs || [], active = jobs.filter(j => ['queued', 'running'].includes(j.status));
+  $('queue-count').textContent = String(queue.queued_count);
+  $('queue-summary-hint').textContent = active.some(j => j.status === 'running') ? '正在执行' : queue.queued_count ? `${queue.queued_count} 项等待` : '暂无等待任务';
+  $('queue-hint').textContent = queue.blocked_by_session && queue.queued_count ? '当前会话仍占用浏览器。关闭后，队列将自动继续。' : '每次执行一个任务，完成后自动开始下一项。';
+  $('queue-release').hidden = !(queue.blocked_by_session && queue.queued_count && current?.task?.sessionOpen && !current?.busy);
+  for (const name of ['active', 'all']) $(`queue-filter-${name}`).setAttribute('aria-pressed', String(queueFilter === name));
+  const signature = JSON.stringify([queueFilter, jobs.map(j => [j.id, j.status, j.run_status])]);
+  if ($('queue-list').dataset.signature === signature) return;
+  $('queue-list').dataset.signature = signature; $('queue-list').replaceChildren();
+  const labels = { queued: '等待中', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' };
+  const visible = queueFilter === 'active' ? active : jobs;
+  if (!visible.length) $('queue-list').append(el('p', 'queue-empty', queueFilter === 'active' ? '没有待执行任务。可在输入区加入新任务。' : '还没有队列任务。'));
+  visible.forEach((job, index) => {
+    const row = el('div', 'queue-row'); row.dataset.status = job.status;
+    const number = el('span', 'queue-order', job.status === 'running' ? '●' : String(index + 1).padStart(2, '0'));
+    const copy = el('div', 'queue-copy'), goal = el('span', 'queue-goal', job.goal); goal.title = job.goal;
+    const status = el('span', 'queue-state', job.status === 'running' && job.run_status.startsWith('waiting_') ? '需要你的回应' : labels[job.status]);
+    copy.append(goal, status); row.append(number, copy);
+    if (job.status === 'running') {
+      const view = el('button', 'btn btn-sm btn-ghost', '查看'); view.onclick = returnCurrent; row.append(view);
+    } else if (job.started_at && ['completed', 'failed', 'interrupted'].includes(job.status)) {
+      const view = el('button', 'btn btn-sm btn-ghost', '查看记录'); view.onclick = () => void openReplay(job.session_id); row.append(view);
+    }
+    if (['queued', 'running'].includes(job.status)) {
+      const cancel = el('button', 'btn btn-sm btn-ghost', '取消'); cancel.setAttribute('aria-label', `取消任务：${job.goal}`);
+      cancel.onclick = async () => { cancel.disabled = true; try { await api(`jobs/${job.id}/cancel`, {}); } catch (e) { toast(e.message); cancel.disabled = false; } };
+      row.append(cancel);
+    }
+    $('queue-list').append(row);
+  });
+}
+function returnCurrent() { composeNew = false; if (replay) exitReplay(); else if (current) render(current); }
+$('return-current').onclick = returnCurrent;
+for (const name of ['active', 'all']) $(`queue-filter-${name}`).onclick = () => { queueFilter = name; renderQueue(current?.queue); };
+function updateComposer() {
+  const blocked = Boolean(current?.busy || current?.task?.sessionOpen || current?.queue?.queued_count || current?.loginOpen || current?.queue?.blocked_by_session);
+  const empty = !$('goal').value.trim();
+  $('run').disabled = blocked || empty || pendingButtons.has('run');
+  $('run').title = blocked ? '当前浏览器正在使用，请加入队列或先关闭当前会话。' : '开始执行新任务';
+  $('enqueue').disabled = empty || pendingButtons.has('enqueue');
+  $('enqueue').classList.toggle('btn-primary', blocked);
+  $('run').classList.toggle('btn-primary', !blocked);
+  $('submit-hint').textContent = blocked ? 'Enter 加入队列 · Shift + Enter 换行' : 'Enter 开始 · Shift + Enter 换行';
+}
+function resizeInput(input) { input.style.height = 'auto'; input.style.height = `${Math.min(180, Math.max(60, input.scrollHeight))}px`; }
+for (const id of ['goal', 'follow-up', 'user-answer']) $(id).addEventListener('input', () => {
+  resizeInput($(id)); $('composer-error').hidden = true; $('decision-error').hidden = true; updateComposer();
+});
 function render(state) {
   const previousBusy = current?.busy;
   renderGrants(state.permissions || []);
@@ -136,12 +218,14 @@ function render(state) {
     $('extension-status').textContent = state.extension.connected ? `扩展已连接${state.extension.browser ? ` · ${(/Chrome\/[\d.]+/.exec(state.extension.browser) || [''])[0]}` : ''}` : '扩展未连接';
   }
   current = state;
+  renderQueue(state.queue);
+  positionPointer();
   $('model-badge').textContent = state.config.model || '待配置';
   $('browser-badge').textContent = browserModes[state.config.browser.mode];
   $('connection').textContent = '本地服务已连接'; $('connection-dot').classList.remove('offline');
   if (!configured) { showConfig(state.config); configured = true; }
   const t = state.task, busy = state.busy;
-  for (const id of ['run', 'demo', 'save-config']) $(id).disabled = busy;
+  $('demo').disabled = busy || Boolean(t?.sessionOpen) || Boolean(state.queue?.queued_count);
   $('save-config').disabled = busy || Boolean(t?.sessionOpen);
   $('save-browser').disabled = busy || Boolean(t?.sessionOpen); $('login-open').disabled = busy || Boolean(t?.sessionOpen);
   $('browser-locked').hidden = !$('save-browser').disabled;
@@ -152,19 +236,36 @@ function render(state) {
   $('export').disabled = !t && !replay;
   // Which view the conversation pane shows: a replayed session, the current task, or the new-task screen.
   const showingTask = Boolean(t) && !replay && !composeNew;
-  const canChat = showingTask && t.sessionOpen && t.mode !== 'demo' && !['stopping', 'pausing', 'starting'].includes(t.status);
+  const managed = state.queue?.jobs.some(j => j.session_id === t?.id);
+  const canChat = showingTask && t.sessionOpen && t.mode !== 'demo' && !managed && !['stopping', 'pausing', 'starting', 'approval', 'waiting_user'].includes(t.status);
   $('welcome').hidden = Boolean(replay) || showingTask;
   $('events').hidden = !replay && !showingTask;
   if (!replay && !showingTask) $('result-box').hidden = true;
   $('chat-title').textContent = replay ? replay.goal : showingTask ? t.goal : '新任务';
-  $('task-composer').hidden = Boolean(replay) || canChat;
+  $('task-composer').hidden = Boolean(replay) || showingTask;
   $('follow-up-box').hidden = !canChat;
+  const contextVisible = Boolean((composeNew || replay) && (busy || t?.sessionOpen));
+  $('task-context').hidden = !contextVisible;
+  $('context-title').textContent = busy ? '当前任务仍在进行' : '当前浏览器会话仍然打开';
+  $('context-description').textContent = busy ? (['approval', 'waiting_user'].includes(t?.status) ? '有一项操作需要你的回应。你也可以先起草下一项任务。' : '可以起草新任务并加入队列，当前任务不会被中断。') : '继续原任务请返回当前会话；新任务可以排队，或关闭当前会话后开始。';
+  $('context-close').hidden = busy || !t?.sessionOpen;
+  updateComposer();
+  for (const id of pendingButtons) $(id).disabled = true;
   if (!t) { $('decision').hidden = true; return; }
   if (lastTask !== t.id) { lastImage = null; lastEventKey = ''; lastTask = t.id; }
-  $('status').textContent = t.mode === 'demo' ? `演示 · ${t.status === 'done' ? '已完成' : states[t.status] || t.status}` : states[t.status] || t.status; $('status').classList.toggle('error', t.status === 'failed');
+  $('status').dataset.state = t.status;
+  $('status').textContent = t.mode === 'demo' ? `演示 · ${t.status === 'done' ? '已完成' : states[t.status] || t.status}` : t.status === 'done' ? '本轮结束' : states[t.status] || t.status; $('status').classList.toggle('error', t.status === 'failed');
   const live = Date.now() - lastFrameAt < 3000 && t.sessionOpen;
   $('replay-recover').disabled = busy;
-  $('step-count').textContent = `动作 ${t.step} · 不限步数 · ${providerLabel[t.provider] || t.provider} · ${live ? '实时画面' : '截图随步骤更新'}${t.context ? ` · 上下文估算 ${t.context.estimatedTokens}/${t.context.contextWindow} · 压缩 ${t.context.compactions} 次` : ''}${t.progress ? ` · ${t.progress.stages.filter(s => s.status === 'done').length}/${t.progress.stages.length} 阶段 · ${t.progress.next}` : ''}${t.metrics?.requests?.length ? ` · 上次请求 ${(t.metrics.requests.at(-1).durationMs / 1000).toFixed(1)}秒` : ''}`;
+  $('step-count').textContent = `${t.step || 0} 次操作${t.progress ? ` · ${t.progress.stages.filter(s => s.status === 'done').length}/${t.progress.stages.length} 阶段` : ''}`;
+  $('frame-label').textContent = !t.sessionOpen ? '会话已关闭' : live ? '实时画面' : '最近画面';
+  $('browser-context-label').textContent = t.status === 'paused' ? '已暂停，可在浏览器中接管' : ['approval', 'waiting_user'].includes(t.status) ? '等待你的回应' : t.sessionOpen ? (t.snapshot?.title || '代理浏览器') : '上一会话画面';
+  $('run-details-content').replaceChildren(...[
+    ['模型服务', providerLabel[t.provider] || t.provider],
+    ['上下文估算', t.context ? `${t.context.estimatedTokens} / ${t.context.contextWindow}` : '暂无'],
+    ['历史压缩', `${t.context?.compactions || 0} 次`],
+    ['最近请求', t.metrics?.requests?.length ? `${(t.metrics.requests.at(-1).durationMs / 1000).toFixed(1)} 秒` : '暂无'],
+  ].map(([label, value]) => { const row = el('div', 'detail-row'); row.append(el('span', '', label), el('strong', '', value)); return row; }));
   $('page-url').textContent = t.snapshot?.url || '正在打开浏览器…';
   const screenshot = t.snapshot?.screenshot;
   if (!live && screenshot !== undefined && screenshot !== lastImage) { if (screenshot) $('screenshot').src = screenshot; else $('screenshot').removeAttribute('src'); lastImage = screenshot; }
@@ -175,11 +276,12 @@ function render(state) {
     $('result-box').hidden = !t.result; markdown($('result'), t.result);
   }
   // One chat box: steers a running task, continues an idle session.
-  $('chat-label').textContent = busy ? '补充说明（下一步生效）' : '继续对话';
+  $('chat-label').textContent = t.status === 'paused' ? '补充说明（继续执行后生效）' : busy ? '补充说明（下一步生效）' : '继续对话';
   $('send').textContent = busy ? '发送补充' : '发送';
   $('close-session').hidden = busy;
   const approval = t.status === 'approval', question = t.status === 'waiting_user';
   $('decision').hidden = !showingTask || !(approval || question);
+  if (!(approval || question)) $('decision-error').hidden = true;
   $('decision-title').textContent = question ? '需要你的帮助' : '确认下一步';
   $('decision-detail').textContent = approval || question ? pendingText(t.pending) : '';
   $('user-answer').hidden = !question; $('answer').hidden = !question; $('approve').hidden = !approval; $('reject').hidden = !approval;
@@ -191,6 +293,7 @@ function offline() { $('connection').textContent = '服务连接中断'; $('conn
 function connect() {
   const unsubscribe = window.desktop.subscribe(({ event, data }) => {
     if (event === 'state') render(data);
+    else if (event === 'pointer') showPointer(data);
     else if (event === 'frame' && current?.task) showFrame(data);
     else if (event === 'offline') { offline(); if (data) toast(data); }
   });
@@ -200,8 +303,11 @@ async function loadHistory() {
   try { renderHistory((await api('sessions')).sessions); } catch (e) { toast(e.message); }
 }
 function renderHistory(sessions) {
+  historyCache = sessions;
+  const query = $('history-search').value.trim().toLocaleLowerCase();
+  sessions = sessions.filter(s => s.goal.toLocaleLowerCase().includes(query));
   $('history-count').textContent = sessions.length ? String(sessions.length) : '';
-  if (!sessions.length) { $('history-list').replaceChildren(el('p', 'muted small', '还没有保存的会话。')); return; }
+  if (!sessions.length) { $('history-list').replaceChildren(el('p', 'muted small', query ? '没有匹配的会话。' : '完成任务后，会话会保存在这里。')); return; }
   $('history-list').replaceChildren(...sessions.map(s => {
     const row = el('div', 'history-row'); row.dataset.id = s.id;
     const item = el('button', `history-item ${s.status}${replay?.id === s.id ? ' active' : ''}`);
@@ -212,6 +318,7 @@ function renderHistory(sessions) {
     return row;
   }));
 }
+$('history-search').addEventListener('input', () => renderHistory(historyCache));
 // Deleting takes two clicks: the first turns the button into “确认删除” for a few seconds.
 function deleteButton(session) {
   const button = el('button', 'history-delete');
@@ -270,7 +377,6 @@ handle('replay-recover', async () => {
 });
 $('new-task').onclick = () => {
   if (replay) exitReplay();
-  if (current?.busy) { composeNew = false; render(current); toast('请先处理当前任务，或停止后创建新任务。'); return; }
   composeNew = true; $('sidebar').classList.remove('open');
   if (current) render(current);
   $('goal').focus();
@@ -278,18 +384,53 @@ $('new-task').onclick = () => {
 $('sidebar-toggle').onclick = () => $('sidebar').classList.toggle('open');
 
 // Settings drawer with tabs (模型 / 浏览器 / 网站权限).
+let drawerReturnFocus = null;
 function showTab(tab) {
-  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tabs button').forEach(b => {
+    const selected = b.dataset.tab === tab; b.classList.toggle('active', selected);
+    b.id ||= `tab-${b.dataset.tab}`; b.setAttribute('aria-controls', b.dataset.tab); b.setAttribute('aria-selected', String(selected)); b.tabIndex = selected ? 0 : -1;
+    $(b.dataset.tab).setAttribute('aria-labelledby', b.id);
+  });
   document.querySelectorAll('.drawer-panel').forEach(p => { p.hidden = p.id !== tab; });
 }
-function openDrawer(tab = 'settings') { if (current && $('drawer').hidden) showConfig(current.config); showTab(tab); $('drawer').hidden = false; $('backdrop').hidden = false; }
-function closeDrawer() { $('drawer').hidden = true; $('backdrop').hidden = true; }
+function openDrawer(tab = 'settings') {
+  if ($('drawer').hidden) { drawerReturnFocus = document.activeElement; if (current) showConfig(current.config); }
+  if (current?.queue?.settings) { const s = current.queue.settings; $('idle-timeout').value = s.idle_timeout_seconds; $('history-retention').value = s.history_retention_days; $('queue-capacity').value = s.max_queued_jobs; }
+  showTab(tab); $('drawer').hidden = false; $('backdrop').hidden = false; document.querySelector('.app').inert = true;
+  document.querySelector(`.tabs [data-tab="${tab}"]`).focus();
+}
+function closeDrawer() { $('drawer').hidden = true; $('backdrop').hidden = true; document.querySelector('.app').inert = false; drawerReturnFocus?.focus(); }
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $('drawer-close').onclick = closeDrawer; $('backdrop').onclick = closeDrawer;
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('drawer').hidden) closeDrawer(); });
+document.addEventListener('keydown', e => {
+  if ($('drawer').hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeDrawer(); return; }
+  const tabs = [...document.querySelectorAll('.tabs button')];
+  if (tabs.includes(document.activeElement) && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+    e.preventDefault(); const index = tabs.indexOf(document.activeElement);
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (index + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    showTab(tabs[next].dataset.tab); tabs[next].focus();
+  }
+  if (e.key === 'Tab') {
+    const items = [...$('drawer').querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary')].filter(n => n.tabIndex >= 0 && n.getClientRects().length);
+    const first = items[0], last = items.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
 $('settings-shortcut').onclick = () => openDrawer('settings');
 $('model-chip').onclick = () => openDrawer('settings');
-function handle(id, fn) { $(id).addEventListener('click', async () => { $(id).disabled = true; try { await fn(); render(await api('state')); } catch (e) { toast(e.message); } finally { $(id).disabled = false; if (current) render(current); } }); }
+function handle(id, fn) {
+  $(id).addEventListener('click', async () => {
+    if (pendingButtons.has(id)) return;
+    pendingButtons.add(id); $(id).disabled = true; $(id).setAttribute('aria-busy', 'true');
+    try { await fn(); render(await api('state')); }
+    catch (e) {
+      const target = ['run', 'enqueue'].includes(id) ? $('composer-error') : ['answer', 'approve', 'reject', 'approve-site', 'deny-site'].includes(id) ? $('decision-error') : null;
+      if (target) { target.textContent = e.message; target.hidden = false; } else toast(e.message);
+    } finally { pendingButtons.delete(id); $(id).disabled = false; $(id).removeAttribute('aria-busy'); if (current) render(current); }
+  });
+}
 $('provider').addEventListener('change', () => {
   syncProvider();
   $('vision').checked = $('provider').value === 'deepseek';
@@ -319,20 +460,34 @@ async function start(demo) {
   composeNew = false; if (replay) exitReplay();
   if (!demo) $('goal').value = '';
 }
+handle('enqueue', async () => {
+  if (!current?.config.model) { openDrawer('settings'); $('model').focus(); throw new Error('请先配置模型，再提交任务。'); }
+  const goal = $('goal').value.trim(); if (!goal) throw new Error('请先描述任务目标。');
+  const button = $('enqueue'); button.disabled = true;
+  try { await api('jobs', { goal, permission_mode: $('permission-mode').value }); $('goal').value = ''; $('queue-panel').open = true; toast('已加入队列'); }
+  finally { button.disabled = false; }
+});
+handle('save-lifecycle', async () => {
+  await api('lifecycle', { idle_timeout_seconds: Number($('idle-timeout').value), history_retention_days: Number($('history-retention').value), max_queued_jobs: Number($('queue-capacity').value) });
+  toast('会话与队列设置已保存');
+});
 handle('run', () => start(false)); handle('demo', () => start(true));
 for (const command of ['pause', 'resume', 'stop', 'approve', 'reject']) handle(command, () => api('control', { command }));
 handle('close-session', () => api('control', { command: 'stop' }));
+handle('context-close', () => api('control', { command: 'stop' }));
+handle('queue-release', () => api('control', { command: 'stop' }));
 handle('approve-site', () => api('control', { command: 'approve_site' }));
 handle('deny-site', () => api('control', { command: 'deny_site' }));
 $('mode-hint').textContent = modeHints[$('permission-mode').value];
 $('permission-mode').addEventListener('change', () => { $('mode-hint').textContent = modeHints[$('permission-mode').value]; });
 handle('answer', async () => { await api('control', { command: 'resume', answer: $('user-answer').value }); $('user-answer').value = ''; });
 handle('send', async () => { await api('messages', { text: $('follow-up').value }); $('follow-up').value = ''; });
-document.querySelectorAll('[data-goal]').forEach(button => button.onclick = () => { $('goal').value = button.dataset.goal; $('goal').focus(); });
+document.querySelectorAll('[data-goal]').forEach(button => button.onclick = () => { $('goal').value = button.dataset.goal; resizeInput($('goal')); updateComposer(); $('goal').focus(); });
 // Enter sends from either composer; Shift+Enter adds a line.
-for (const [input, button] of [['goal', 'run'], ['follow-up', 'send']]) $(input).addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $(button).click(); } });
+for (const [input, button] of [['goal', 'run'], ['follow-up', 'send']]) $(input).addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $(input === 'goal' && $('run').disabled ? 'enqueue' : button).click(); } });
 $('export').onclick = async () => { try { const result = await window.desktop.exportSession(replay?.id || null); if (!result.canceled) toast('会话已导出。'); } catch (e) { toast(e.message); } };
 $('open-extension-directory').hidden = false;
 $('open-extension-directory').onclick = () => window.desktop.openExtensionDirectory().catch(e => toast(e.message));
+showTab('settings');
 connect();
 void loadHistory();

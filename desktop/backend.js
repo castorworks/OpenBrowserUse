@@ -29,7 +29,7 @@ try {
     browserOptions: { headless: process.env.BROWSER_HEADLESS === '1' },
   });
   unsubscribe = runtime.api.subscribe((event, data) => {
-    if (event === 'state') send({ type: 'event', event, data });
+    if (event === 'state' || event === 'pointer') send({ type: 'event', event, data });
     else {
       frame = data;
       frameTimer ||= setTimeout(() => { frameTimer = null; send({ type: 'event', event: 'frame', data: frame }); }, 120);
