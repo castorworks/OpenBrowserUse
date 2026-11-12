@@ -17,14 +17,8 @@ function syncProvider() {
   $('base-url').placeholder = h.base; $('base-url-hint').textContent = h.hint; $('model').placeholder = h.model;
 }
 const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', extension: 'Chrome 扩展' };
-// Fetched only when the extension option is shown; it is not part of the streamed state.
-async function loadExtensionToken() {
-  if ($('extension-token').value) return;
-  try { $('extension-token').value = (await api('extension/token', {})).token; } catch (e) { toast(e.message); }
-}
 function syncBrowserMode() {
   const mode = $('browser-mode').value;
-  if (mode === 'extension') void loadExtensionToken();
   document.querySelectorAll('.browser-persistent').forEach(el => el.hidden = mode !== 'persistent');
   document.querySelectorAll('.browser-extension').forEach(el => el.hidden = mode !== 'extension');
 }
@@ -212,8 +206,9 @@ function render(state) {
   renderGrants(state.permissions || []);
   if (state.extension) {
     $('extension-server').value = state.extension.serverURL || location.origin;
+    $('extension-connection-hint').textContent = new URL($('extension-server').value).port === '4318' ? '扩展自动连接，无需配对。请保持 Chrome 和扩展运行。' : '当前中继端口不是 4318。请将 PORT / OBU_DESKTOP_PORT 改为 4318 并重启后台，扩展才能自动连接。';
     $('extension-dot').classList.toggle('offline', !state.extension.connected);
-    $('extension-status').textContent = state.extension.connected ? `扩展已连接${state.extension.browser ? ` · ${(/Chrome\/[\d.]+/.exec(state.extension.browser) || [''])[0]}` : ''}` : '扩展未连接';
+    $('extension-status').textContent = state.extension.connected ? `扩展已连接${state.extension.browser ? ` · ${(/Chrome\/[\d.]+/.exec(state.extension.browser) || [''])[0]}` : ''}` : '等待 Chrome 扩展自动连接';
   }
   current = state;
   renderQueue(state.queue);
@@ -448,7 +443,6 @@ async function saveBrowser(message) {
   $('model-migration').hidden = !config.modelRequiresSelection; toast(message);
 }
 handle('save-browser', () => saveBrowser('浏览器设置已保存。'));
-$('copy-token').onclick = async () => { try { await navigator.clipboard.writeText($('extension-token').value); toast('配对令牌已复制。'); } catch { $('extension-token').select(); } };
 handle('save-blocked', () => saveBrowser('受保护网站已保存。'));
 handle('login-open', () => api('login', { action: 'open' }));
 handle('login-close', () => api('login', { action: 'close' }));

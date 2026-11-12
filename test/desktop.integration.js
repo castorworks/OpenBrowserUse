@@ -1,3 +1,4 @@
+import { testExtension } from './helpers/extension.js';
 import { demoServer } from './helpers/demo-server.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -43,18 +44,16 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
     res.end(JSON.stringify({ choices: [{ finish_reason: read ? 'stop' : 'tool_calls', message: read ? { role: 'assistant', content: '桌面模型测试完成。' } : { role: 'assistant', content: '观察当前页面。', tool_calls: [{ id: 'read', type: 'function', function: { name: 'read_page', arguments: '{"filter":"all"}' } }] } }] }));
   });
   await new Promise(r => mock.listen(0, '127.0.0.1', r));
-  // Occupy the preferred port to prove the app chooses a free port and reports it.
-  const occupied = createServer((_req, res) => res.end('other service'));
-  await new Promise(r => occupied.listen(0, '127.0.0.1', r));
+  // Use an isolated relay port; the copied test extension connects there automatically.
   let desktop, extensionBrowser;
-  const env = { ...process.env, OBU_DATA_DIR: join(dir, 'data'), OBU_DESKTOP_USER_DATA: join(dir, 'electron'), OBU_DESKTOP_PORT: String(occupied.address().port), OBU_DESKTOP_TEST: '1', BROWSER_HEADLESS: '1' };
+  const env = { ...process.env, OBU_DATA_DIR: join(dir, 'data'), OBU_DESKTOP_USER_DATA: join(dir, 'electron'), OBU_DESKTOP_PORT: '0', OBU_DESKTOP_TEST: '1', BROWSER_HEADLESS: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
   const launch = () => electron.launch({ ...(process.env.OBU_ELECTRON_EXECUTABLE ? { executablePath: process.env.OBU_ELECTRON_EXECUTABLE, args: [] } : { args: [resolve('.')] }), env, timeout: 30000 });
   t.after(async () => {
     await desktop?.close().catch(() => {}); await extensionBrowser?.close().catch(() => {});
     site.closeAllConnections(); await new Promise(r => site.close(r));
-    mock.closeAllConnections(); occupied.closeAllConnections();
-    await Promise.all([new Promise(r => mock.close(r)), new Promise(r => occupied.close(r))]);
+    mock.closeAllConnections();
+    await new Promise(r => mock.close(r));
     await rm(dir, { recursive: true, force: true });
   });
   desktop = await launch();
@@ -78,7 +77,6 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   assert.match(deniedSender, /不允许|bridge unavailable/);
   const initial = await api('state');
   const origin = initial.extension.serverURL;
-  assert.notEqual(new URL(origin).port, String(occupied.address().port));
   await assert.rejects(api('../secret'), /不支持/);
   for (const path of ['/', '/api/state', '/api/events', '/demo', '/app.js']) assert.equal((await fetch(origin + path)).status, 404, path);
   await page.locator('#demo').click();
@@ -99,7 +97,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await page.locator('[data-tab="browser-settings"]').click();
   assert.deepEqual(await page.locator('#browser-mode option').evaluateAll(options => options.map(o => o.value)), ['ephemeral', 'persistent', 'extension']);
   await page.selectOption('#browser-mode', 'extension');
-  await page.waitForFunction(() => document.getElementById('extension-token').value.length >= 20);
+  assert.equal(await page.locator('#extension-token, #copy-token').count(), 0);
   assert.equal(await page.locator('#open-extension-directory').isVisible(), true);
   await page.selectOption('#browser-mode', 'persistent');
   assert.equal(await page.locator('#login-open').isVisible(), true);
@@ -198,11 +196,9 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
 
   const executablePath = extensionChromium();
   assert.ok(executablePath, 'Install Playwright Chromium or set OBU_TEST_CHROMIUM for the extension integration test');
-  const extensionPath = process.env.OBU_ELECTRON_EXECUTABLE ? resolve(process.env.OBU_ELECTRON_EXECUTABLE, '../../Resources/extension') : resolve('extension');
+  const extensionPath = await testExtension(dir, origin, process.env.OBU_ELECTRON_EXECUTABLE ? resolve(process.env.OBU_ELECTRON_EXECUTABLE, '../../Resources/extension') : resolve('extension'));
   extensionBrowser = await chromium.launchPersistentContext(join(dir, 'chrome'), { executablePath, headless: true, args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`] });
   const worker = extensionBrowser.serviceWorkers()[0] || await extensionBrowser.waitForEvent('serviceworker');
-  const token = (await api('extension/token', {})).token;
-  await worker.evaluate(({ server, token }) => chrome.storage.local.set({ server, token }), { server: origin, token });
   await until(async () => (await api('state')).extension.connected);
   const panel = await extensionBrowser.newPage();
   await panel.goto(`chrome-extension://${new URL(worker.url()).host}/sidepanel.html`);

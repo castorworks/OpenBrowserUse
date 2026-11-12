@@ -10,6 +10,7 @@ test('desktop-only runtime rejects HTTP, fallback port is propagated, subscripti
   const dir = await mkdtemp(join(tmpdir(), 'obu-runtime-'));
   const blocker = createServer();
   await new Promise(r => blocker.listen(0, '127.0.0.1', r));
+  await assert.rejects(startRuntime({ port: blocker.address().port, env: {}, dataDir: dir }), error => error.code === 'EADDRINUSE' && /OBU_SERVICE_URL/.test(error.message));
   const runtime = await startRuntime({ port: blocker.address().port, fallbackPort: true, env: {}, dataDir: dir });
   t.after(async () => { await runtime.close(); await new Promise(r => blocker.close(r)); await rm(dir, { recursive: true, force: true }); });
   assert.notEqual(runtime.port, blocker.address().port);

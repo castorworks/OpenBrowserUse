@@ -157,7 +157,7 @@ DELETE /sessions/{id} 仅允许已关闭会话；排队或执行中的任务应�
 
 - 服务面向单租户调用，默认绑定 IPv4 loopback，可通过 OBU_API_HOST 设置外部监听地址；部署见 [服务部署](service.md)。除 /healthz 和 /readyz 的最小健康信息外，所有端点鉴权；来自网页的 Origin/Sec-Fetch-Site 请求被拒绝，不支持浏览器 CORS 客户端。Token 至少 32 个非空白字符。
 - HTTP JSON 请求体最大 8 MiB，内部桌面桥接也使用该上限；桌面自带后台的 IPC 不受 HTTP 请求体上限约束。
-- API 不返回模型 Key 或配对令牌，输出及持久化记录经过现有脱敏逻辑；任意自由文本仍无法保证识别所有秘密。
+- API 不返回模型 Key，输出及持久化记录经过现有脱敏逻辑；任意自由文本仍无法保证识别所有秘密。
 - 已实现 SSE、HTTP 截图/导出/删除、FIFO 队列和生命周期管理。尚未提供多浏览器并发、Webhook、多用户或 SDK。
 
 测试范围与运行方法见 [开发与发布](development.md#测试范围)。

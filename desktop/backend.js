@@ -30,7 +30,7 @@ try {
     runtime = { api: client, origin: client.origin, close: () => client.close() };
   } else {
     runtime = await startRuntime({
-      port: Number(process.env.OBU_DESKTOP_PORT ?? process.env.PORT ?? 4318), fallbackPort: true,
+      port: Number(process.env.OBU_DESKTOP_PORT ?? process.env.PORT ?? 4318), fallbackPort: false,
       browserOptions: { headless: process.env.BROWSER_HEADLESS === '1' },
     });
   }

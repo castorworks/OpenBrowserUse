@@ -1,10 +1,11 @@
+import { testExtension } from './helpers/extension.js';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { WebSocket } from 'ws';
 import { createApplication } from '../lib/application.js';
@@ -57,7 +58,7 @@ before(async () => {
     res.end(JSON.stringify({ choices: [{ message: reply(JSON.parse(raw)), finish_reason: 'stop' }] }));
   });
   await new Promise(r => mock.listen(mockPort, '127.0.0.1', r));
-  const extensionPath = resolve('extension');
+  const extensionPath = await testExtension(dataDir, origin);
   chrome = await chromium.launchPersistentContext(userDir, {
     executablePath, headless: true, viewport: null,
     // A 2x display, like a Retina Mac, so CSS and device pixels differ.
@@ -75,33 +76,30 @@ after(async () => {
   await rm(dataDir, { recursive: true, force: true }); await rm(userDir, { recursive: true, force: true });
 });
 
-test('extension pairs with the relay only with the right token', { skip: !executablePath && 'no Chromium build that loads extensions' }, async () => {
-  await worker.evaluate(o => chrome.storage.local.set({ server: o.origin, token: 'wrong-token-wrong-token' }), { origin });
-  await sleep(1500);
-  assert.equal(relay.connected(), false, 'wrong token is refused');
-  await worker.evaluate(o => chrome.storage.local.set({ server: o.origin, token: o.token }), { origin, token: relay.token });
+test('extension automatically connects without pairing and rejects web origins', { skip: !executablePath && 'no Chromium build that loads extensions' }, async () => {
   await until(() => relay.connected());
   const state = (await api.request('GET', '/api/state')).body;
   assert.equal(state.extension.connected, true);
   assert.equal(state.extension.token, undefined, 'the token is not in the streamed state');
-  assert.equal((await post('extension/token', {})).body.token, relay.token);
+  assert.equal((await post('extension/token', {})).status, 404, 'pairing endpoint is removed');
+  assert.equal(existsSync(join(dataDir, 'extension-token')), false, 'no pairing credential is created');
   assert.equal((await fetch(`${origin}/api/extension/token`)).status, 404, 'a plain GET (e.g. navigating to it) cannot read the token');
   assert.equal((await fetch(`${origin}/api/extension/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 404, 'HTTP management endpoints do not exist');
   // A plain web page cannot open the extension channel.
   const refused = (url, options) => new Promise(done => { const ws = new WebSocket(url, options); ws.on('unexpected-response', (req, res) => done(res.statusCode)); ws.on('open', () => { ws.close(); done('open'); }); ws.on('error', () => {}); });
-  assert.equal(await refused(`ws://127.0.0.1:${port}/relay/extension?token=${relay.token}`, { origin: 'https://evil.example' }), 403);
+  assert.equal(await refused(`ws://127.0.0.1:${port}/relay/extension`, { origin: 'https://evil.example' }), 403);
   assert.equal(await refused(`ws://127.0.0.1:${port}/relay/cdp/not-the-secret`), 403);
-  // The side panel pairs and focuses the desktop; it cannot embed a web workbench.
+  // The side panel reports automatic connection and focuses the desktop; it cannot embed a web workbench.
   const extensionId = new URL(worker.url()).host;
   const panel = await chrome.newPage();
   await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
   await panel.waitForFunction(() => document.getElementById('status').textContent === '已连接');
-  assert.equal(await panel.locator('iframe').count(), 0);
+  assert.equal(await panel.locator('iframe, #pair, #token, #server').count(), 0);
   let focused = false; relay.once('desktop-focus', () => { focused = true; });
   await panel.locator('#open-desktop').click();
   await until(() => focused);
   relay.extension.ws.close(1001, 'Reconnect test');
-  await panel.waitForFunction(() => document.getElementById('status').textContent === '未连接');
+  await panel.waitForFunction(() => document.getElementById('status').textContent === '等待本机服务');
   assert.equal(await panel.locator('#open-desktop').isDisabled(), true);
   await panel.waitForFunction(() => document.getElementById('status').textContent === '已连接');
   await panel.close();

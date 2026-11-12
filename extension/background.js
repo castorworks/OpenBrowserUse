@@ -2,19 +2,17 @@
 // through chrome.debugger, only the tabs this extension opened for it (the agent tab group).
 // The user's own tabs are never attached, reported or closed.
 
-const DEFAULTS = { server: 'http://127.0.0.1:4318', token: '' };
+const RELAY_URL = 'ws://127.0.0.1:4318/relay/extension';
 const GROUP = { title: 'Open Browser Use', color: 'orange' };
 const state = { status: 'disconnected', error: '' };
 const agentTabs = new Set();   // tabs created for the agent (and popups they opened)
 const attached = new Set();    // agent tabs with the debugger attached
 let ws = null, groupId = null, retryTimer = null, pingTimer = null;
 
-async function settings() { return { ...DEFAULTS, ...(await chrome.storage.local.get(['server', 'token'])) }; }
-
 function setStatus(status, error = '') {
   Object.assign(state, { status, error });
   chrome.runtime.sendMessage({ type: 'status', ...state }).catch(() => {});
-  chrome.action.setBadgeText({ text: status === 'connected' ? '' : status === 'unpaired' ? '?' : '!' }).catch(() => {});
+  chrome.action.setBadgeText({ text: status === 'connected' ? '' : '!' }).catch(() => {});
   chrome.action.setBadgeBackgroundColor({ color: '#b45309' }).catch(() => {});
 }
 
@@ -23,17 +21,8 @@ function send(message) { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.str
 async function connect() {
   clearTimeout(retryTimer);
   if (ws && ws.readyState <= WebSocket.OPEN) return;
-  const { server, token } = await settings();
-  if (!token) return setStatus('unpaired');
-  let url;
-  try {
-    url = new URL('/relay/extension', server);
-    if (!['127.0.0.1', 'localhost'].includes(url.hostname)) throw new Error('服务器地址必须是本机');
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.searchParams.set('token', token);
-  } catch (error) { return setStatus('error', error.message); }
   setStatus('connecting');
-  const socket = new WebSocket(url);
+  const socket = new WebSocket(RELAY_URL);
   ws = socket;
   socket.onopen = () => {
     setStatus('connected');
@@ -168,9 +157,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     reply({ ok }); return;
   }
   if (message?.type === 'get-status') { reply({ ...state }); return; }
-  if (message?.type === 'reconnect') { ws?.close(); ws = null; void connect(); reply({ ok: true }); }
 });
-chrome.storage.onChanged.addListener(changes => { if (changes.server || changes.token) { ws?.close(); ws = null; void connect(); } });
 chrome.alarms.create('reconnect', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(() => void connect());
 chrome.runtime.onInstalled.addListener(() => { chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {}); void connect(); });

@@ -39,7 +39,7 @@ Windows PowerShell 使用 `Copy-Item .env.example .env`。默认 API 地址是 `
 ## 文档
 
 - [文档导航](docs/README.md)：按使用场景查找文档。
-- [桌面与 Chrome 扩展](docs/desktop.md)：任务操作、配对、权限和历史。
+- [桌面与 Chrome 扩展](docs/desktop.md)：任务操作、扩展自动连接、权限和历史。
 - [服务部署](docs/service.md)：本机服务、Electron 连接已有服务、Docker。
 - [HTTP API](docs/api.md) · [OpenAPI 契约](docs/openapi.json)：外部系统接入。
 - [配置参考](docs/configuration.md)：模型、环境变量、端口和数据目录。

@@ -19,7 +19,7 @@
 | `npm run icons` | 在 macOS 生成应用及扩展图标 |
 | `npm run release:mac` | macOS ARM64 签名、公证与发布产物 |
 
-业务规则集中在 `lib/task-service.js`，状态持久化与投影在 `lib/task-state.js`，队列与清理在 `lib/task-scheduler.js`。新增入口应复用这些模块；完整职责见架构文档。`desktop/renderer/` 只通过 preload IPC 访问后台，`extension/` 负责 Chrome 配对和代理标签页，`lib/tools/` 提供浏览器工具。
+业务规则集中在 `lib/task-service.js`，状态持久化与投影在 `lib/task-state.js`，队列与清理在 `lib/task-scheduler.js`。新增入口应复用这些模块；完整职责见架构文档。`desktop/renderer/` 只通过 preload IPC 访问后台，`extension/` 负责本机服务自动连接和代理标签页，`lib/tools/` 提供浏览器工具。
 
 ## 测试范围
 

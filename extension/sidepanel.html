@@ -10,16 +10,9 @@
     <img src="icons/32.png" alt="" width="20" height="20">
     <strong>Open Browser Use</strong>
     <span id="status" class="pill">连接中</span>
-    <button id="toggle-pair" class="link" title="配对设置">配对</button>
   </header>
-  <form id="pair" hidden>
-    <p>在工作台“设置 → 浏览器”中选择“Chrome 扩展”，复制配对令牌粘贴到这里。</p>
-    <label for="server">本机连接地址</label><input id="server" value="http://127.0.0.1:4318" spellcheck="false">
-    <label for="token">配对令牌</label><input id="token" type="password" autocomplete="off" spellcheck="false">
-    <button type="submit">保存并连接</button>
-    <p id="error" class="error" hidden></p>
-  </form>
-  <section class="empty"><p>任务、会话和设置在桌面应用中管理。</p><button id="open-desktop" disabled>打开桌面工作台</button></section>
-  <section id="offline" class="empty" hidden><p>没有连接到 Open Browser Use 桌面应用。</p><p>请启动桌面应用，然后点“配对”。</p></section>
+  <p id="error" class="error" role="alert" hidden></p>
+  <section class="empty"><p>扩展自动连接本机服务。通过桌面工作台或标准 API 管理任务。</p><button id="open-desktop" disabled>打开桌面工作台</button></section>
+  <section id="offline" class="empty" hidden><p>等待本机 Open Browser Use 服务。</p><p>请启动桌面应用或独立服务，扩展会自动重连。连接地址：<code>127.0.0.1:4318</code>。</p></section>
 </body>
 </html>

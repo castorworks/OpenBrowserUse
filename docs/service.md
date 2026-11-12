@@ -29,7 +29,9 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 ## 本机 Chrome 扩展模式
 
-服务和 Chrome 都在本机时，可以在 `.env` 设置 `BROWSER_MODE=extension`，直接运行 `npm run start:service`。在 Chrome 加载 `extension/` 目录，打开扩展侧边栏，将服务器地址设为 `http://127.0.0.1:4318`，配对令牌读取数据目录中的 `extension-token` 文件（默认 `~/.openbrowseruse/extension-token`）。扩展令牌与 HTTP API Token 是两个独立凭据。Chrome 和扩展保持运行，外部调用方仍使用 HTTP API 端口 4319。
+服务和 Chrome 都在本机时，可以在 `.env` 设置 `BROWSER_MODE=extension`，直接运行 `npm run start:service`。在 Chrome 加载 `extension/` 目录后，扩展自动连接 `127.0.0.1:4318`，无需输入地址或令牌。保持中继端口为 4318；未启动服务时侧边栏显示“等待本机服务”，服务启动后自动重连。标准 API 仍要求 `OBU_API_TOKEN`。Chrome 和扩展保持运行，外部调用方仍使用 HTTP API 端口 4319。
+
+同一台机器只运行一套供扩展连接的后台；端口已占用时不会自动切换。若独立服务已经运行，桌面通过下文的 `OBU_SERVICE_URL` 连接它。
 
 若已经保存过浏览器设置，先在桌面修改为扩展模式，环境变量不会覆盖正常的已保存配置。旧 CDP、Anthropic 配置的处理见 [升级与迁移](migration.md)。模型参数见 [配置参考](configuration.md)。
 
