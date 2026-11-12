@@ -7,7 +7,7 @@ import { createApplication } from '../lib/application.js';
 
 test('task input, follow-ups and control answers pass former size limits without a step cap', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'obu-size-'));
-  const api = createApplication({ port: 14530, dataDir, env: {} });
+  const api = createApplication({ port: 14530, dataDir, env: { MODEL_PROVIDER: 'openai', MODEL_NAME: 'fixture' } });
   const { agent } = api;
   const post = body => api.request('POST', '/api/tasks', body);
   try {

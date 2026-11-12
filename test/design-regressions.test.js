@@ -40,7 +40,7 @@ test('review includes actual script and batched images keep the latest two', () 
 });
 
 import { ConfigStore } from '../lib/config-store.js';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { authorize } from '../lib/permissions/policy.js';
@@ -49,7 +49,7 @@ import { trimImages } from '../lib/providers/budget.js';
 test('browser settings and protected sites survive a fresh store', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'obu-browser-config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const browser = { mode: 'cdp', cdpURL: 'http://localhost:9222', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: ['protected.example'] };
+  const browser = { mode: 'extension', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: ['protected.example'] };
   new ConfigStore({ dir }).save({ provider: 'openai', baseURL: 'http://localhost', model: 'test', apiKey: '', effort: 'high', vision: false, reviewerModel: '', browser });
   assert.deepEqual(new ConfigStore({ dir }).load().browser, browser);
 });
@@ -61,12 +61,13 @@ test('protected frame origin takes precedence over allowed top page', async () =
   assert.equal(result.action, 'block');
 });
 
-test('native Anthropic image storage is bounded without dropping tool results', () => {
-  const messages = [{ role: 'user', content: [1,2,3].map(id => ({ type: 'tool_result', tool_use_id: String(id), content: [{ type: 'image', source: { data: String(id) } }] })) }];
+test('native OpenAI image storage is bounded without dropping text', () => {
+  const messages = [{ role: 'user', content: [{ type: 'text', text: 'keep me' }, ...[1,2,3].map(id => ({ type: 'image_url', image_url: { url: String(id) } }))] }];
   trimImages(messages);
-  assert.equal(messages[0].content.length, 3);
-  assert.equal(messages[0].content[0].content[0].type, 'text');
-  assert.equal(messages[0].content[2].content[0].source.data, '3');
+  assert.equal(messages[0].content.length, 4);
+  assert.equal(messages[0].content[0].text, 'keep me');
+  assert.equal(messages[0].content[1].type, 'text');
+  assert.equal(messages[0].content[3].image_url.url, '3');
 });
 
 test('management API routing blocks same-origin fetches from agent pages', async () => {
@@ -76,4 +77,36 @@ test('management API routing blocks same-origin fetches from agent pages', async
     await b.guard({ request: () => ({ url: () => `http://${host}:4318/api/extension/token` }), abort: async () => { blocked = true; }, continue: async () => { continued = true; } });
     assert.equal(blocked, true); assert.equal(continued, false);
   }
+});
+
+
+test('legacy direct connection config requires a new browser selection without losing model settings', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'obu-legacy-browser-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new ConfigStore({ dir });
+  await writeFile(store.file, JSON.stringify({ provider: 'openai', baseURL: 'http://localhost', model: 'test', apiKey: 'preserved', effort: 'high', vision: false, reviewerModel: '', browser: { mode: 'cdp', cdpURL: 'http://localhost:9222', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: [] } }));
+  const config = store.load();
+  assert.equal(config.apiKey, 'preserved');
+  assert.equal(config.browser.requiresSelection, true);
+  assert.equal('cdpURL' in config.browser, false);
+  store.save({ ...config, browser: { mode: 'extension', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: [] } });
+  assert.equal(store.load().browser.mode, 'extension');
+  assert.equal(store.load().browser.requiresSelection, undefined);
+});
+
+
+test('removed model configuration never reuses old credentials or endpoint', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'obu-legacy-model-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new ConfigStore({ dir });
+  await writeFile(store.file, JSON.stringify({ provider: 'anthropic', baseURL: 'https://old.example', model: 'old-model', apiKey: 'old-secret', effort: 'high', vision: true, reviewerModel: 'old-reviewer' }));
+  const config = store.load();
+  assert.equal(config.provider, 'openai');
+  assert.equal(config.baseURL, 'https://api.openai.com/v1');
+  assert.equal(config.modelRequiresSelection, true);
+  assert.equal(config.apiKey, '');
+  assert.equal(config.model, '');
+  assert.equal(config.reviewerModel, '');
+  store.save(config);
+  assert.equal(store.load().modelRequiresSelection, true);
 });

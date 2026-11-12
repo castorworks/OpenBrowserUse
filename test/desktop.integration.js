@@ -93,11 +93,11 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await page.selectOption('#provider', 'deepseek');
   assert.equal(await page.locator('#base-url').inputValue(), 'https://api.deepseek.com');
   assert.equal(await page.locator('#vision').isChecked(), true);
-  await page.selectOption('#provider', 'anthropic');
-  assert.equal(await page.locator('#vision').isVisible(), false);
+  await page.selectOption('#provider', 'openai');
+  assert.equal(await page.locator('#vision').isVisible(), true);
+  assert.deepEqual(await page.locator('#provider option').evaluateAll(options => options.map(o => o.value)), ['openai', 'deepseek']);
   await page.locator('[data-tab="browser-settings"]').click();
-  await page.selectOption('#browser-mode', 'cdp');
-  assert.equal(await page.locator('#cdp-url').isVisible(), true);
+  assert.deepEqual(await page.locator('#browser-mode option').evaluateAll(options => options.map(o => o.value)), ['ephemeral', 'persistent', 'extension']);
   await page.selectOption('#browser-mode', 'extension');
   await page.waitForFunction(() => document.getElementById('extension-token').value.length >= 20);
   assert.equal(await page.locator('#open-extension-directory').isVisible(), true);
@@ -212,7 +212,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await panel.locator('#open-desktop').click();
   await until(() => desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()));
   await panel.close();
-  await api('browser', { mode: 'extension', cdpURL: 'http://127.0.0.1:9222', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: [] });
+  await api('browser', { mode: 'extension', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: [] });
   await api('tasks', { goal: '验证桌面应用连接真实 Chrome 扩展', startURL: siteURL });
   await until(async () => { const s = await api('state'); return s.task.status === 'done' && !s.busy; });
   assert.match((await api('state')).task.result, /桌面模型测试完成/);

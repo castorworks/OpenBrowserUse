@@ -1,24 +1,22 @@
 const $ = id => document.getElementById(id);
 let current = null, configured = false, lastImage = null, lastEventKey = '', lastTask = null, lastFrameAt = 0, replay = null, lastStatus = '', composeNew = false;
 const states = { starting: '启动浏览器', running: '执行中', pausing: '正在暂停', paused: '已暂停 · 可接管', approval: '等待确认', waiting_user: '需要你的帮助', stopping: '正在停止', stopped: '已停止', done: '本轮结束 · 结果待验证', failed: '执行失败' };
-const providerLabel = { anthropic: 'Claude', deepseek: 'DeepSeek', openai: 'OpenAI 兼容', demo: '固定脚本演示' };
+const providerLabel = { deepseek: 'DeepSeek', openai: 'OpenAI 兼容', demo: '固定脚本演示' };
 function toast(message) { $('toast-message').textContent = message; $('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').hidden = true, 6500); }
 $('toast-dismiss').onclick = () => { $('toast').hidden = true; clearTimeout(toast.timer); };
 const pendingButtons = new Set();
 let historyCache = [], queueFilter = 'active';
 const api = (path, data) => window.desktop.request(path, data && ['control', 'messages'].includes(path) ? { ...data, interactionId: current?.task?.pending?.id } : data);
 const providerHints = {
-  anthropic: { base: '留空使用 Anthropic 官方地址', hint: '（可选）', model: '例如 claude-opus-5-5' },
   deepseek: { base: 'https://api.deepseek.com', hint: '（默认官方地址）', model: '图像识别使用 deepseek-flash' },
   openai: { base: 'https://api.openai.com/v1', hint: '（含 /v1，不含 /chat/completions）', model: '服务商提供的模型 ID' },
 };
 function syncProvider() {
   const provider = $('provider').value, h = providerHints[provider];
   document.querySelectorAll('.provider-effort').forEach(el => el.hidden = provider === 'openai');
-  document.querySelectorAll('.provider-openai').forEach(el => el.hidden = provider === 'anthropic');
   $('base-url').placeholder = h.base; $('base-url-hint').textContent = h.hint; $('model').placeholder = h.model;
 }
-const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', extension: 'Chrome 扩展', cdp: '连接 Chrome' };
+const browserModes = { ephemeral: '独立会话', persistent: '持久化配置', extension: 'Chrome 扩展' };
 // Fetched only when the extension option is shown; it is not part of the streamed state.
 async function loadExtensionToken() {
   if ($('extension-token').value) return;
@@ -28,21 +26,21 @@ function syncBrowserMode() {
   const mode = $('browser-mode').value;
   if (mode === 'extension') void loadExtensionToken();
   document.querySelectorAll('.browser-persistent').forEach(el => el.hidden = mode !== 'persistent');
-  document.querySelectorAll('.browser-cdp').forEach(el => el.hidden = mode !== 'cdp');
   document.querySelectorAll('.browser-extension').forEach(el => el.hidden = mode !== 'extension');
 }
 function showBrowserConfig(b) {
   $('blocked-sites').value = (b.blockedSites || []).join('\n');
-  $('browser-mode').value = b.mode; $('cdp-url').value = b.cdpURL || ''; $('allow-localhost').checked = b.allowLocalhost; $('allow-private').checked = b.allowPrivateNetwork;
+  $('browser-mode').value = b.mode; $('browser-migration').hidden = !b.requiresSelection; $('allow-localhost').checked = b.allowLocalhost; $('allow-private').checked = b.allowPrivateNetwork;
   $('browser-badge').textContent = browserModes[b.mode]; syncBrowserMode();
 }
 function showConfig(config) {
   showBrowserConfig(config.browser);
+  $('model-migration').hidden = !config.modelRequiresSelection;
   $('provider').value = config.provider; $('base-url').value = config.baseURL; $('model').value = config.model;
   $('context-window').value = config.contextWindow || 128000; $('output-reserve').value = config.outputReserve || 16000;
   $('effort').value = config.effort; $('vision').checked = config.vision; $('reviewer-model').value = config.reviewerModel || ''; syncProvider();
   $('model-badge').textContent = config.model || '待配置';
-  $('key-status').textContent = config.hasKey ? '· 已配置，留空保留' : config.envKey ? '· 使用环境变量' : '· 尚未配置';
+  $('key-status').textContent = config.hasKey ? '· 已配置，留空保留' : '· 尚未配置';
 }
 function pendingText(p) {
   if (!p) return '';
@@ -444,8 +442,9 @@ handle('save-config', async () => {
 });
 $('browser-mode').addEventListener('change', syncBrowserMode);
 async function saveBrowser(message) {
-  const config = await api('browser', { mode: $('browser-mode').value, cdpURL: $('cdp-url').value.trim(), allowLocalhost: $('allow-localhost').checked, allowPrivateNetwork: $('allow-private').checked, blockedSites: $('blocked-sites').value.split(/\s+/).map(x => x.trim()).filter(Boolean) });
-  showBrowserConfig(config.browser); toast(message);
+  const config = await api('browser', { mode: $('browser-mode').value, allowLocalhost: $('allow-localhost').checked, allowPrivateNetwork: $('allow-private').checked, blockedSites: $('blocked-sites').value.split(/\s+/).map(x => x.trim()).filter(Boolean) });
+  showBrowserConfig(config.browser);
+  $('model-migration').hidden = !config.modelRequiresSelection; toast(message);
 }
 handle('save-browser', () => saveBrowser('浏览器设置已保存。'));
 $('copy-token').onclick = async () => { try { await navigator.clipboard.writeText($('extension-token').value); toast('配对令牌已复制。'); } catch { $('extension-token').select(); } };

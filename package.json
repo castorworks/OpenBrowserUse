@@ -13,13 +13,13 @@
     "dist": "electron-builder --publish never",
     "release:mac": "node scripts/release-mac.mjs",
     "icons": "node scripts/build-icons.mjs",
-    "api": "node bin/server.js"
+    "api": "node bin/server.js",
+    "start:service": "node --env-file-if-exists=.env bin/server.js"
   },
   "engines": {
     "node": ">=22.12"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "dompurify": "^3.4.17",
     "marked": "^18.1.1",
@@ -48,6 +48,7 @@
     "files": [
       "desktop/**/*",
       "lib/**/*",
+      "docs/openapi.json",
       "bin/**/*",
       "package.json",
       "assets/**/*",

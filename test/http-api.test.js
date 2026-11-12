@@ -25,7 +25,7 @@ async function fixture(t) {
     res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message, finish_reason: 'stop' }] }));
   });
   await new Promise(r => model.listen(0, '127.0.0.1', r));
-  const env = { OBU_API_ENABLED: '1', OBU_API_PORT: '0', OBU_API_TOKEN: token, MODEL_PROVIDER: 'openai', MODEL_NAME: 'fixture', MODEL_BASE_URL: `http://127.0.0.1:${model.address().port}/v1`, MODEL_API_KEY: 'private-model-key' };
+  const env = { OBU_API_ENABLED: '1', OBU_API_PORT: '0', OBU_API_HOST: '0.0.0.0', OBU_API_TOKEN: token, MODEL_PROVIDER: 'openai', MODEL_NAME: 'fixture', MODEL_BASE_URL: `http://127.0.0.1:${model.address().port}/v1`, MODEL_API_KEY: 'private-model-key' };
   const runtime = await startRuntime({ port: 0, env, dataDir: dir, browserOptions: { headless: true } });
   const call = async (method, path, body, key = crypto.randomUUID(), auth = token) => {
     const r = await fetch(`http://127.0.0.1:${runtime.httpPort}/v1${path}`, { method, headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', 'Idempotency-Key': key }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -39,8 +39,19 @@ async function fixture(t) {
 
 test('HTTP accepts once, preserves rounds, shares desktop lock, and keeps secrets private', async t => {
   const f = await fixture(t), { call, runtime } = f;
+  const base = `http://127.0.0.1:${runtime.httpPort}`;
+  for (const path of ['/healthz', '/readyz']) {
+    const health = await fetch(base + path);
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { status: 'ok' });
+  }
+  assert.equal((await fetch(base + '/v1/openapi.json')).status, 401);
+  const contract = await fetch(base + '/v1/openapi.json', { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(contract.status, 200);
+  assert.deepEqual((await contract.json()).servers, [{ url: '/v1' }]);
   assert.equal((await call('GET', '/status', undefined, undefined, 'wrong')).status, 401);
   assert.equal((await fetch(runtime.origin + '/v1/status')).status, 404);
+  assert.equal((await call('POST', '/sessions', { browser_mode: 'cdp' })).status, 422);
   const [one, two] = await Promise.all([call('POST', '/sessions', {}, 'session-1'), call('POST', '/sessions', {}, 'session-1')]);
   assert.equal(one.status, 201); assert.deepEqual(two.body, one.body);
   const sid = one.body.id;
@@ -159,7 +170,7 @@ test('SIGKILL recovery preserves the run acceptance without repeating model call
   const { fileURLToPath } = await import('node:url');
   const { runtime, env, dir, question, calls } = await fixture(t); question();
   await runtime.close();
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../bin/server.js', import.meta.url))], { env: { ...process.env, ...env, OBU_DATA_DIR: dir, PORT: '0', BROWSER_HEADLESS: '1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../bin/server.js', import.meta.url))], { env: { ...process.env, ...env, OBU_API_HOST: '127.0.0.1', OBU_DATA_DIR: dir, PORT: '0', BROWSER_HEADLESS: '1' }, stdio: ['ignore', 'ignore', 'pipe'] });
   t.after(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child, 'exit'); } });
   let output = '';
   child.stderr.on('data', chunk => { output += chunk; });
@@ -235,7 +246,7 @@ test('FIFO jobs wait for interactive sessions, run serially and close their brow
   assert.equal((await call('GET', `/runs/${one.run_id}`)).body.created_at, one.created_at);
   const e = (await call('GET', `/runs/${one.run_id}/events`)).body.data;
   assert.equal(e[0].data.status, 'queued'); assert.equal(e.at(-1).type, 'run.finished');
-  assert.equal(runtime.agent.browser, null);
+  assert.ok(!runtime.agent.browser);
 });
 
 test('idle cleanup and retention preserve pending work; deletion tombstones related requests', async t => {
@@ -286,4 +297,42 @@ test('a waiting queued job owns the slot until cancelled; idle cleanup never ski
   assert.equal((await call('GET', `/jobs/${first.id}`)).body.status, 'cancelled');
   await call('POST', `/jobs/${next.id}/cancel`, {});
   await until(async () => (await call('GET', `/jobs/${next.id}`)).body.status === 'cancelled');
+});
+
+test('legacy queued direct connections fail without launching a replacement browser', async t => {
+  const { runtime, call, calls } = await fixture(t);
+  const session = await call('POST', '/sessions', {});
+  const job = await call('POST', '/jobs', { goal: 'legacy task' });
+  const api = runtime.api.httpApi;
+  const row = api.db.prepare('SELECT payload FROM api_queue WHERE job_id=?').get(job.body.id);
+  const payload = api.lifecycle.payload.open(row.payload);
+  payload.config.browser.mode = 'cdp';
+  api.db.prepare('UPDATE api_queue SET payload=? WHERE job_id=?').run(api.lifecycle.payload.seal(payload), job.body.id);
+  await call('POST', `/sessions/${session.body.id}/close`, {});
+  const failed = await until(async () => {
+    const result = await call('GET', `/jobs/${job.body.id}`);
+    return result.body.status === 'failed' && result.body;
+  });
+  assert.equal((await call('GET', `/runs/${failed.run_id}`)).body.error.code, 'browser_mode_removed');
+  assert.equal(calls(), 0);
+  assert.ok(!runtime.agent.browser);
+});
+
+test('legacy queued model providers fail without calling another service', async t => {
+  const { runtime, call, calls } = await fixture(t);
+  const session = await call('POST', '/sessions', {});
+  const job = await call('POST', '/jobs', { goal: 'legacy task' });
+  const api = runtime.api.httpApi;
+  const row = api.db.prepare('SELECT payload FROM api_queue WHERE job_id=?').get(job.body.id);
+  const payload = api.lifecycle.payload.open(row.payload);
+  payload.config.provider = 'anthropic';
+  api.db.prepare('UPDATE api_queue SET payload=? WHERE job_id=?').run(api.lifecycle.payload.seal(payload), job.body.id);
+  await call('POST', `/sessions/${session.body.id}/close`, {});
+  const failed = await until(async () => {
+    const result = await call('GET', `/jobs/${job.body.id}`);
+    return result.body.status === 'failed' && result.body;
+  });
+  assert.equal((await call('GET', `/runs/${failed.run_id}`)).body.error.code, 'model_provider_removed');
+  assert.equal(calls(), 0);
+  assert.ok(!runtime.agent.browser);
 });

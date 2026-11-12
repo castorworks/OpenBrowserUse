@@ -12,7 +12,7 @@ if (!saved?.model || !saved?.apiKey) throw new Error('Configure a saved model an
 const dir = await mkdtemp(join(tmpdir(), 'obu-live-api-'));
 let runtime;
 try {
-  new ConfigStore({ dir }).save({ ...saved, vision: false, browser: { mode: 'ephemeral', cdpURL: '', blockedSites: [], allowLocalhost: true, allowPrivateNetwork: false } });
+  new ConfigStore({ dir }).save({ ...saved, vision: false, browser: { mode: 'ephemeral', blockedSites: [], allowLocalhost: true, allowPrivateNetwork: false } });
   const token = crypto.randomUUID() + crypto.randomUUID();
   runtime = await startRuntime({ port: 0, dataDir: dir, browserOptions: { headless: true }, env: { OBU_API_ENABLED: '1', OBU_API_TOKEN: token, OBU_API_PORT: '0' } });
   const call = async (path, body) => {

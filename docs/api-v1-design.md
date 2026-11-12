@@ -17,7 +17,7 @@
 - 所有端点（含状态、事件与图片）要求 `Authorization: Bearer <token>`。API token 独立于模型 Key、扩展配对令牌；禁止通过 URL 传 token。不返回配置密钥或配对令牌。
 - 首版一个 token 代表本机所有者，可访问全部 API 会话。默认不启用 CORS，不使用 cookie；明确配置允许来源才支持浏览器跨域调用。远程访问须通过 HTTPS 入口，不能将本地单用户凭据模型描述为多租户授权。
 - 浏览器代理的管理地址阻断必须增加 API 端口，同时覆盖 localhost 别名、IPv4/IPv6 和实际配置地址，避免网页经代理调用管理接口。
-- 模型、CDP 地址、持久化目录由服务端配置；请求仅能选择已经配置的浏览器模式，不接受任意文件路径、模型 Key 或模型 Base URL。
+- 模型、浏览器模式、持久化目录由服务端配置；请求仅能选择已经配置的浏览器模式，不接受任意文件路径、模型 Key 或模型 Base URL。
 
 ## 3. 资源模型
 
@@ -25,7 +25,7 @@
 
 ID 使用 UUID，客户端当作不透明字符串。时间使用 UTC RFC 3339 字符串；JSON 字段统一 snake_case。响应只返回公开 DTO，不序列化 Agent、controller、原始 provider 上下文或密钥。
 
-Session 字段：`id`、`status`（open/closed）、`browser_mode`（ephemeral/persistent/cdp/extension）、`browser_status`（not_started/starting/ready/closed）、`permission_mode`（ask/auto/skip）、`created_at`、`updated_at`、`active_run_id`（可空）、`last_run_id`（可空）、`model`（provider/name）。创建时固定配置快照；模型及权限设置在该会话内不可更改。permission_mode 默认 skip，与现有行为一致。
+Session 字段：`id`、`status`（open/closed）、`browser_mode`（ephemeral/persistent/extension）、`browser_status`（not_started/starting/ready/closed）、`permission_mode`（ask/auto/skip）、`created_at`、`updated_at`、`active_run_id`（可空）、`last_run_id`（可空）、`model`（provider/name）。创建时固定配置快照；模型及权限设置在该会话内不可更改。permission_mode 默认 skip，与现有行为一致。
 
 Run 字段：`id`、`session_id`、`status`、`goal`、`start_url`（可空）、`created_at`、`started_at`、`finished_at`（后两者可空）、`result`（可空）、`error`（可空）、`pending_interaction_id`（可空）、`recovered_from_run_id`（可空）、`metrics`、`revision`（单调递增整数）。metrics 提供模型请求数、工具调用数、重试数和 provider 原始 usage；未知 usage 为 null，不估算为零。
 

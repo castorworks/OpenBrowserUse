@@ -113,7 +113,7 @@ test('agent runs in the user\'s Chrome through the extension, only in its own ta
   await userTab.goto(`${origin}/demo`);
   await userTab.fill('#query', '用户自己的输入');
   await post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${mockPort}/v1`, model: 'mock', apiKey: 'k' });
-  assert.equal((await post('browser', { mode: 'extension', cdpURL: '', allowLocalhost: true, allowPrivateNetwork: false })).status, 200);
+  assert.equal((await post('browser', { mode: 'extension', allowLocalhost: true, allowPrivateNetwork: false })).status, 200);
   assert.equal((await post('tasks', { goal: '搜索键盘并读取价格', startURL: `${origin}/demo`, maxSteps: 20, permissionMode: 'skip' })).status, 202);
   await until(() => !agent.busy, 60000);
   assert.equal(agent.task.status, 'done', `${agent.task.result} ${JSON.stringify(agent.task.events.slice(-4))}`);

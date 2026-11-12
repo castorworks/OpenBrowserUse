@@ -2,8 +2,8 @@
   "openapi": "3.1.1",
   "info": {
     "title": "OpenBrowserUse HTTP API",
-    "version": "1.1.0",
-    "description": "Local single-owner API with one active browser, durable FIFO jobs, SSE replay, screenshots, export, lifecycle settings and visual cursor events. HTTP browser origins remain disabled; use a server-side client."
+    "version": "1.2.0",
+    "description": "Single-tenant service API with one active browser, durable FIFO jobs, SSE replay, screenshots, export, lifecycle settings and visual cursor events. HTTP browser origins remain disabled; use a server-side client."
   },
   "servers": [
     {
@@ -2279,6 +2279,148 @@
           }
         }
       }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "getOpenApi",
+        "summary": "Machine-readable API contract",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "openapi",
+                    "info",
+                    "paths"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token required"
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Minimal service probe; does not check model credentials or free capacity",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "stopping"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stopping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "stopping"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "/"
+          }
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "getReadiness",
+        "summary": "Minimal service probe; does not check model credentials or free capacity",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "stopping"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stopping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "stopping"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "/"
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -2332,12 +2474,7 @@
           },
           "browser_mode": {
             "type": "string",
-            "enum": [
-              "ephemeral",
-              "persistent",
-              "cdp",
-              "extension"
-            ]
+            "description": "Current modes: ephemeral, persistent, extension. Historical sessions retain the original mode name, including removed modes."
           },
           "browser_status": {
             "type": "string",
@@ -2856,7 +2993,6 @@
             "enum": [
               "ephemeral",
               "persistent",
-              "cdp",
               "extension"
             ]
           },

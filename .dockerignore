@@ -1,0 +1,8 @@
+*
+!package.json
+!package-lock.json
+!lib/**
+!bin/**
+!docs/openapi.json
+!assets/**
+assets/icons/*concept*.png

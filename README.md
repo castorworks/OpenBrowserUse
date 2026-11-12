@@ -1,6 +1,10 @@
 # Open Browser Use
 
-一个本地运行的 AI 浏览器代理。输入自然语言目标，模型像 Claude in Chrome 一样通过工具调用读取页面、点击、输入、切换标签页，界面显示截图、每一步工具调用和结果；完成后可以在同一个浏览器里继续对话。支持实时代理光标、点击与拖动反馈、串行任务队列及会话自动清理。默认使用 Anthropic Claude（`claude-opus-5-5`），也支持 DeepSeek 和兼容 OpenAI 的 Chat Completions 服务（需支持 function calling）。
+一个本地运行的 AI 浏览器代理。输入自然语言目标，模型像 Claude in Chrome 一样通过工具调用读取页面、点击、输入、切换标签页，界面显示截图、每一步工具调用和结果；完成后可以在同一个浏览器里继续对话。支持实时代理光标、点击与拖动反馈、串行任务队列及会话自动清理。支持 DeepSeek 和兼容 OpenAI 的 Chat Completions 服务（需支持 function calling），默认选择 OpenAI 兼容接口，模型名称由用户配置。
+
+## 独立 HTTP 服务
+
+支持脱离桌面部署，外部系统可通过标准 HTTP API 提交任务、订阅 SSE 并读取结果。提供 Docker Compose、Bearer Token 鉴权、OpenAPI 和持久化队列。部署与调用见 [服务部署指南](docs/service.md)。
 
 ## 开始使用
 
@@ -36,7 +40,6 @@ npm run test:desktop    # 真实 Electron + Chrome 扩展集成测试
 
 在“模型设置”里选择服务类型：
 
-- **Anthropic Claude**：模型默认 `claude-opus-5-5`，Base URL 留空即官方地址。Key 可在界面填写；留空时使用 `ANTHROPIC_API_KEY` 或 `ant auth login` 的凭据。“思考强度”对应 `output_config.effort`，默认 high。
 - **DeepSeek**：Base URL 留空即 `https://api.deepseek.com`，模型默认 `deepseek-flash`（也可用 `deepseek-v4-pro`），填写 DeepSeek 的 API Key（或设置 `DEEPSEEK_API_KEY`）。DeepSeek 默认开启思考模式：工具调用期间会把 `reasoning_content` 原样回传（否则接口返回 400），思考内容显示在对话中；“思考强度”映射为 `reasoning_effort`（low → low，medium / high / xhigh → high，max → max）。DeepSeek 默认开启截图输入，图像识别请选择 `deepseek-flash`；按[官方视觉接口](https://api-docs.deepseek.com/zh-cn/guides/vision/)将截图以 user 消息中的 base64 `image_url` 发送，使用 `detail: original`。`computer screenshot` 查看全图，`computer zoom` 提供无损 PNG 局部截图，可用于小字、验证码等图片识别。设置中可关闭“发送截图”；自动模式的审查使用同一模型。
 - **OpenAI 兼容服务**：Base URL 如 `https://api.openai.com/v1`（不要附加 `/chat/completions`），填写模型 ID 和 Key。模型必须支持 tools / function calling。“发送截图”仅在模型支持视觉时开启。
 
@@ -59,7 +62,7 @@ npm run test:desktop    # 真实 Electron + Chrome 扩展集成测试
 | 模式 | 行为 |
 |---|---|
 | 逐步确认（可选） | 每次点击、输入、按键、表单填写都在工作台确认 |
-| 自动 · 审查风险 | 先跑固定规则，再由审查模型（Claude 默认 `claude-haiku-5-5`，其他服务用主模型）判断：安全的直接执行，有后果的（购买、发送、删除、发布、提交个人信息）请你确认，明显违背你意图的直接阻止。审查失败或无法解析时一律请你确认 |
+| 自动 · 审查风险 | 先跑固定规则，再由审查模型（默认使用主模型，也可单独指定模型名称）判断：安全的直接执行，有后果的（购买、发送、删除、发布、提交个人信息）请你确认，明显违背你意图的直接阻止。审查失败或无法解析时一律请你确认 |
 | 直接执行（默认） | 所有工具直接执行，不受网站权限、字段类型、受保护网站或脚本确认限制 |
 
 可选确认模式及操作记录：
@@ -76,13 +79,6 @@ npm run test:desktop    # 真实 Electron + Chrome 扩展集成测试
 - **独立会话**（默认）：每次任务启动全新浏览器，不保留 Cookie 和登录。
 - **使用持久化浏览器配置**：专用配置目录（默认 `~/.openbrowseruse/profile`，可用 `BROWSER_PROFILE_DIR` 修改）保留登录，与个人 Chrome 分开。点击“打开登录浏览器”手动登录需要的网站，关闭后再执行任务（同一配置不能被两个窗口同时使用）。
 - **Chrome 扩展（推荐）**：代理在你日常使用的 Chrome 里工作，使用你的登录状态，类似 Claude in Chrome。见下一节。
-- **连接我正在运行的 Chrome（CDP）**：用 `--remote-debugging-port=9222` 启动 Chrome，代理连接 `http://127.0.0.1:9222`，在你的登录状态下工作。代理只读取、操作和关闭它自己打开的标签页；停止时断开连接，不关闭你的浏览器。CDP 支持本机或远程 HTTP(S)/WS(S) 地址。
-
-```bash
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="$HOME/.openbrowseruse/chrome-cdp"
-```
-
-（新版 Chrome 不允许对默认配置开启远程调试，需要指定单独的 `--user-data-dir`。）
 
 可访问 localhost 和内网，但代理标签页禁止访问工作台的 /api 和 /relay 管理接口；旧地址权限选项不再生效。
 
@@ -126,20 +122,21 @@ args = ["/path/to/OpenBrowserUse/bin/mcp.js"]
 env = { BROWSER_MODE = "persistent" }
 ```
 
-MCP 服务器直接执行所有工具，不读取网站权限或拦截密码、文件、支付字段。`javascript` 默认可用，旧 `MCP_ALLOW_JAVASCRIPT` 开关不再生效。浏览器在第一次调用工具时启动，客户端断开时关闭（CDP 模式只关闭自己的标签页）。可用环境变量：`BROWSER_MODE`、`BROWSER_CDP_URL`、`BROWSER_PROFILE_DIR`、`BROWSER_HEADLESS=1`、`OBU_DATA_DIR`、`OBU_WORKBENCH_ORIGIN`（默认 `http://127.0.0.1:4318`）。
+MCP 服务器直接执行所有工具，不读取网站权限或拦截密码、文件、支付字段。`javascript` 默认可用，旧 `MCP_ALLOW_JAVASCRIPT` 开关不再生效。浏览器在第一次调用工具时启动，客户端断开时关闭。可用环境变量：`BROWSER_MODE`、`BROWSER_PROFILE_DIR`、`BROWSER_HEADLESS=1`、`OBU_DATA_DIR`、`OBU_WORKBENCH_ORIGIN`（默认 `http://127.0.0.1:4318`）。
 
 注意：持久化配置同一时间只能被一个浏览器使用，工作台和 MCP 服务器不要同时用 `persistent` 模式。
 
 ## 环境配置
 
 ```bash
-export MODEL_PROVIDER=anthropic        # 或 deepseek / openai
-export MODEL_NAME=claude-opus-5-5
-export ANTHROPIC_API_KEY=...           # Anthropic；OpenAI 兼容服务用 MODEL_API_KEY / MODEL_BASE_URL
+export MODEL_PROVIDER=openai           # 或 deepseek
+export MODEL_NAME=your-model-id
+export MODEL_BASE_URL=https://api.openai.com/v1
+export MODEL_API_KEY=...
 npm start
 ```
 
-浏览器按 Chrome → Edge → Playwright Chromium 的顺序自动选择，可用 `BROWSER_CHANNEL=chrome|msedge|chromium` 指定。浏览器设置的默认值可用 `BROWSER_MODE=ephemeral|persistent|extension|cdp`、`BROWSER_CDP_URL`、`BROWSER_PROFILE_DIR` 设置。端口由 `PORT` 配置，默认 4318，仅绑定 `127.0.0.1`。不要把真实 Key 写入仓库。
+浏览器按 Chrome → Edge → Playwright Chromium 的顺序自动选择，可用 `BROWSER_CHANNEL=chrome|msedge|chromium` 指定。浏览器设置的默认值可用 `BROWSER_MODE=ephemeral|persistent|extension`、`BROWSER_PROFILE_DIR` 设置。端口由 `PORT` 配置，默认 4318，仅绑定 `127.0.0.1`。不要把真实 Key 写入仓库。
 
 ## 实现结构
 
@@ -160,13 +157,13 @@ lib/sessions.js          会话保存（node:sqlite）
 lib/extension/           Chrome 扩展中继（模拟 CDP 端点）和配对令牌
 extension/               Chrome 扩展（MV3：后台连接、chrome.debugger、标签组、侧边栏）
 lib/prompt.js            系统提示词（固定内容，便于缓存）
-lib/providers/           anthropic.js（SDK 流式、自适应思考、拒绝回退）、openai.js、demo.js
+lib/providers/           openai.js（OpenAI 兼容接口及 DeepSeek）、demo.js
 lib/tools/               read_page / find / get_page_text、computer、navigate / tabs / form_input、控制台/网络/javascript
 lib/permissions/         权限模式、网站授权、规则、受保护网站、审查模型
 lib/browser/             会话、跨 iframe 和 Shadow DOM 的元素引用、URL 解析、浏览器选择
 desktop/renderer/        中文桌面工作台，仅使用 preload IPC 桥接
 assets/demo/             本地演示商店，由 lib/demo.js 内嵌加载
-test/app.test.js         真实浏览器 + 模拟 OpenAI / Anthropic 接口的集成测试
+test/app.test.js         真实浏览器 + 模拟 OpenAI 兼容接口的集成测试
 ```
 
 任务输入、追加消息和人工补充回答不设本地字符上限，工具步数和模型轮数不限。模型设置可填写上下文窗口（默认 128,000 token）和输出预留（默认 16,000，实际最多为窗口的四分之一），请按所选服务的真实容量配置；不会根据模型名猜测容量。界面显示上下文估算、压缩次数、阶段进度及上次请求耗时。
@@ -195,7 +192,7 @@ test/app.test.js         真实浏览器 + 模拟 OpenAI / Anthropic 接口的�
 | `javascript` | 在页面执行脚本 |
 | `ask_user` | 请用户回答或接管 |
 
-Anthropic 请求使用 `messages.stream`，开启自适应思考；支持的模型会把工具调用之间的进度说明显示在执行记录中。直连官方 API 时开启服务端拒绝回退（`fallbacks: "default"`）；自定义 Base URL 时不发送。所有服务只保留最近 2 张截图。
+模型统一通过 Chat Completions 接口调用。DeepSeek 使用独立的思考参数与 reasoning_content 回传逻辑；所有服务只保留最近 2 张截图。
 
 ## 验证
 
@@ -203,15 +200,15 @@ Anthropic 请求使用 `messages.stream`，开启自适应思考；支持的模�
 npm test
 ```
 
-测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON 和 Anthropic SSE 流），不消耗模型额度。覆盖 Chrome 扩展（真实加载扩展：配对、标签组隔离、实时画面、侧边栏）、MCP 服务器（stdio 客户端实测）、IPC 实时状态和画面、执行中补充、会话保存与回放、工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框输入、IPC 调用来源检查、HTTP 网页入口不可用、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、本地演示、Markdown 安全渲染和桌面导出。截图输出在 `artifacts/`。
+测试使用真实无头浏览器和本机模拟模型接口（OpenAI 兼容 JSON），不消耗模型额度。覆盖 Chrome 扩展（真实加载扩展：配对、标签组隔离、实时画面、侧边栏）、MCP 服务器（stdio 客户端实测）、IPC 实时状态和画面、执行中补充、会话保存与回放、工具 schema、iframe / Shadow DOM 引用、坐标点击、密码框输入、IPC 调用来源检查、HTTP 网页入口不可用、Key 不回传、切换服务清除 Key、逐步确认、追问、暂停恢复、人工补充、拒绝、错误上限、本地演示、Markdown 安全渲染和桌面导出。截图输出在 `artifacts/`。
 
 扩展测试需要能加载解压扩展的 Chromium / Chrome for Testing（正式版 Chrome 已不支持 `--load-extension`）：默认使用 Playwright 自带或缓存中的 Chromium，也可用 `OBU_TEST_CHROMIUM=<可执行文件路径>` 指定；找不到时跳过。
 
-HTTP API 的接口契约和真实浏览器 + 模拟模型集成测试包含在 `npm test` 中。已用本机配置的真实 DeepSeek 完成 HTTP API 公开页面读取、续聊、历史结果保留及关闭会话验证；尚未用真实 Anthropic / OpenAI Key 做端到端验证。
+HTTP API 的接口契约和真实浏览器 + 模拟模型集成测试包含在 `npm test` 中。已用本机配置的真实 DeepSeek 完成 HTTP API 公开页面读取、续聊、历史结果保留及关闭会话验证；尚未用真实 OpenAI Key 做端到端验证。
 
 ## 当前边界
 
-- 网页对话框自动关闭，浏览器接受下载；文件上传和密码输入可由代理完成。持久化配置和 CDP 模式下，代理可以使用这些登录状态执行操作，请只对信任的任务使用自动或跳过确认模式。
+- 网页对话框自动关闭，浏览器接受下载；文件上传和密码输入可由代理完成。持久化配置和 Chrome 扩展模式下，代理可以使用这些登录状态执行操作，请只对信任的任务使用自动或跳过确认模式。
 - 封闭 Shadow DOM 和纯 Canvas 页面没有 ref，需要截图 + 坐标操作。
 - 模型可见任务、网页文字、截图和工具结果。请按所选服务商的数据处理方式选择浏览内容。
 - 逐步确认模式可以控制每一步；自动模式依赖规则和审查模型，不能保证识别全部敏感操作；直接执行模式不做本地权限拦截。导航本身也可能引发站点行为。

@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Agent } from '../lib/agent.js';
 import { SessionStore } from '../lib/sessions.js';
-import { AnthropicProvider } from '../lib/providers/anthropic.js';
 import { OpenAIProvider } from '../lib/providers/openai.js';
 import { ExtensionRelay } from '../lib/extension/relay.js';
 
@@ -153,15 +152,6 @@ test('extension capability negotiation rejects old workers before opening any ta
   await openai.step({ signal: new AbortController().signal });
   assert.match(sent.messages.at(-1).content[0].text, /memory-1/);
   assert.equal(openai.context.archive.get('memory-1'), text);
-  const anthropic = new AnthropicProvider({ apiKey: 'test', baseURL: 'http://localhost', model: 'mock' }, { system: 's', tools: [] });
-  anthropic.addUserText(text);
-  t.mock.method(anthropic.client.messages, 'stream', params => {
-    sent = params;
-    return { finalMessage: async () => ({ content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }) };
-  });
-  await anthropic.step({ signal: new AbortController().signal });
-  assert.match(sent.messages[0].content[0].text, /memory-1/);
-  assert.equal(anthropic.context.archive.get('memory-1'), text);
 });
 
 test('manual resume preserves long answers', async t => {

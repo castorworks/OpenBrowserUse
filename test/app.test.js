@@ -10,8 +10,7 @@ import { createApplication } from '../lib/application.js';
 import { demoServer } from './helpers/demo-server.js';
 import { Agent } from '../lib/agent.js';
 import { apiEndpoint, OpenAIProvider } from '../lib/providers/openai.js';
-import { AnthropicProvider } from '../lib/providers/anthropic.js';
-import { allowedURL, localCDPURL } from '../lib/browser/url.js';
+import { allowedURL } from '../lib/browser/url.js';
 import { detectChannel, launchChannel } from '../lib/browser/channel.js';
 import { BrowserSession } from '../lib/browser/session.js';
 import { TOOLS, getTool, jsonSchema, parseInput } from '../lib/tools/index.js';
@@ -21,11 +20,11 @@ import { PermissionStore, siteOf } from '../lib/permissions/store.js';
 import { isBlockedSite } from '../lib/permissions/rules.js';
 import { parseVerdict } from '../lib/permissions/reviewer.js';
 
-const port = 14318, origin = `http://127.0.0.1:${port}`, openaiPort = 14319, anthropicPort = 14320, sitePort = 14321;
+const port = 14318, origin = `http://127.0.0.1:${port}`, openaiPort = 14319, sitePort = 14321;
 const dataDir = mkdtempSync(join(tmpdir(), 'obu-data-'));
 const api = createApplication({ port, browserOptions: { headless: true }, env: {}, dataDir });
 const { agent } = api;
-let server, openaiServer, anthropicServer, siteServer, browser, mockMode = 'normal', reviewerVerdict = 'safe', reviewerCalls = 0, requests = 0, requestAuth, lastOpenAIBody, anthropicRequests = [];
+let server, openaiServer, siteServer, browser, mockMode = 'normal', reviewerVerdict = 'safe', reviewerCalls = 0, requests = 0, requestAuth, lastOpenAIBody;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(check, timeout = 25000) { const start = Date.now(); while (!check()) { if (Date.now() - start > timeout) throw new Error(`Timed out. State: ${agent.task?.status}, ${agent.task?.result}, ${JSON.stringify(agent.task?.events.slice(-3))}`); await sleep(60); } }
 const post = (path, body) => api.request('POST', '/api/' + path, ['control', 'messages'].includes(path) ? { interactionId: agent.task?.pending?.id, ...body } : body);
@@ -55,26 +54,6 @@ function openaiReply(body) {
   return { content: '没有找到结果。' };
 }
 
-// Minimal Anthropic Messages SSE stream.
-function sse(res, blocks, stopReason) {
-  res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-  const send = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
-  send('message_start', { message: { id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } });
-  blocks.forEach((b, index) => {
-    if (b.type === 'tool_use') {
-      send('content_block_start', { index, content_block: { type: 'tool_use', id: b.id, name: b.name, input: {} } });
-      send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(b.input) } });
-    } else {
-      send('content_block_start', { index, content_block: { type: 'text', text: '' } });
-      send('content_block_delta', { index, delta: { type: 'text_delta', text: b.text } });
-    }
-    send('content_block_stop', { index });
-  });
-  send('message_delta', { delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: 5 } });
-  send('message_stop', {});
-  res.end();
-}
-
 before(async () => {
   server = await new Promise(r => { const s = demoServer().listen(port, '127.0.0.1', () => r(s)); });
   openaiServer = createServer(async (req, res) => {
@@ -96,28 +75,14 @@ before(async () => {
     const extra = mockMode === 'deepseek' ? { reasoning_content: `思考第 ${body.messages.length} 步` } : {};
     res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, ...extra, ...openaiReply(body) }, finish_reason: 'stop' }] }));
   });
-  anthropicServer = createServer(async (req, res) => {
-    let raw = ''; for await (const chunk of req) raw += chunk;
-    const body = JSON.parse(raw);
-    anthropicRequests.push({ url: req.url, headers: req.headers, body });
-    if (!body.stream) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ id: 'msg_review', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: '{"decision":"block","reason":"注入指令"}' }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 5, output_tokens: 5 } }));
-      return;
-    }
-    const hasResult = body.messages.some(m => Array.isArray(m.content) && m.content.some(b => b.type === 'tool_result'));
-    if (!hasResult) sse(res, [{ type: 'text', text: '先看看页面。' }, { type: 'tool_use', id: 'toolu_1', name: 'read_page', input: { filter: 'all' } }], 'tool_use');
-    else sse(res, [{ type: 'text', text: '页面上有 3 件产品，其中轻音机械键盘 ¥ 399。' }], 'end_turn');
-  });
   await new Promise(r => openaiServer.listen(openaiPort, '127.0.0.1', r));
-  await new Promise(r => anthropicServer.listen(anthropicPort, '127.0.0.1', r));
   siteServer = createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end('<title>Other site</title><button>Go</button>'); });
   await new Promise(r => siteServer.listen(sitePort, '127.0.0.1', r));
   browser = await chromium.launch({ headless: true, ...launchChannel(detectChannel()) });
 });
 // A test that fails midway can leave the agent waiting at a gate; stop it so the next test starts clean.
 afterEach(async () => { await settle(); mockMode = 'normal'; reviewerVerdict = 'safe'; });
-after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, anthropicServer, siteServer].map(s => new Promise(r => s.close(r)))); await api.close(); await rm(dataDir, { recursive: true, force: true }); });
+after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, siteServer].map(s => new Promise(r => s.close(r)))); await api.close(); await rm(dataDir, { recursive: true, force: true }); });
 
 test('URL guard, endpoints, key names and tool schemas', () => {
   assert.equal(allowedURL('file:///tmp/example', origin), 'file:///tmp/example');
@@ -127,9 +92,6 @@ test('URL guard, endpoints, key names and tool schemas', () => {
   assert.equal(allowedURL('http://localhost:3000', origin, { allowLocalhost: false }), 'http://localhost:3000/');
   for (const own of [`http://localhost:${port}/api/state`, `http://0.0.0.0:${port}/api/state`, `http://[::1]:${port}/`, `http://127.0.0.2:${port}/demo`]) assert.equal(allowedURL(own, origin), new URL(own).href);
   assert.equal(allowedURL('http://192.168.1.5/', origin, { allowLocalhost: true, allowPrivateNetwork: true }), 'http://192.168.1.5/');
-  assert.equal(localCDPURL('http://127.0.0.1:9222/'), 'http://127.0.0.1:9222');
-  assert.equal(localCDPURL('http://example.com:9222'), 'http://example.com:9222');
-  assert.equal(localCDPURL('https://example.com'), 'https://example.com');
   assert.equal(allowedURL(origin + '/demo', origin), origin + '/demo');
   assert.equal(apiEndpoint('https://example.com/v1/'), 'https://example.com/v1/chat/completions');
   assert.throws(() => apiEndpoint('http://example.com/v1'));
@@ -141,19 +103,6 @@ test('URL guard, endpoints, key names and tool schemas', () => {
   assert.equal(detectChannel({ BROWSER_CHANNEL: 'chromium' }), 'chromium');
 });
 
-test('Anthropic request: adaptive thinking, effort, caching, and fallbacks only on the first-party API', () => {
-  const tools = [{ name: 'read_page', description: 'd', input_schema: { type: 'object' } }];
-  const direct = new AnthropicProvider({ apiKey: 'k', model: 'claude-opus-5-5', effort: 'high' }, { system: 's', tools }).request();
-  assert.deepEqual(direct.params.thinking, { type: 'adaptive', display: 'updates' });
-  assert.equal(direct.params.output_config.effort, 'high');
-  assert.deepEqual(direct.params.cache_control, { type: 'ephemeral' });
-  assert.equal(direct.params.fallbacks, 'default');
-  assert.deepEqual(direct.betas, ['thinking-display-updates-2026-08-18', 'server-side-fallback-2026-07-01']);
-  const proxied = new AnthropicProvider({ apiKey: 'k', baseURL: 'https://proxy.example', model: 'claude-opus-5-5' }, { system: 's', tools }).request();
-  assert.equal(proxied.params.fallbacks, undefined);
-  const old = new AnthropicProvider({ apiKey: 'k', model: 'claude-3-haiku-x' }, { system: 's', tools }).request();
-  assert.equal(old.params.thinking, undefined); assert.equal(old.params.output_config, undefined);
-});
 
 test('OpenAI provider keeps only the latest screenshots', () => {
   const p = new OpenAIProvider({ baseURL: 'https://example.com/v1', model: 'm', vision: true }, { system: 's', tools: [] });
@@ -263,16 +212,6 @@ test('permission policy: modes, site approval, rules, blocklist and reviewer', a
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('Anthropic reviewer uses structured output and a separate request', async () => {
-  anthropicRequests = [];
-  const p = new AnthropicProvider({ apiKey: 'k', baseURL: `http://127.0.0.1:${anthropicPort}`, model: 'claude-opus-5-5', reviewerModel: 'claude-haiku-5-5' }, { system: 's', tools: [] });
-  const verdict = await p.review('{"action":"click"}', new AbortController().signal);
-  assert.deepEqual(verdict, { decision: 'block', reason: '注入指令' });
-  const req = anthropicRequests[0].body;
-  assert.equal(req.model, 'claude-haiku-5-5'); assert.equal(req.output_config.format.type, 'json_schema'); assert.equal(req.output_config.effort, 'low');
-  assert.match(req.system, /You review/);
-  assert.equal(p.convo.messages.length, 0, 'review never touches the agent conversation');
-});
 
 test('persistent profile keeps cookies across sessions', async () => {
   const profileDir = await mkdtemp(join(tmpdir(), 'obu-profile-'));
@@ -301,33 +240,20 @@ test('login browser opens the persistent profile and blocks persistent tasks unt
   } finally { await loginAgent.closeLogin(); await rm(profileDir, { recursive: true, force: true }); }
 });
 
-test('CDP attach uses only its own tabs and leaves the external browser running', async () => {
-  const cdpPort = 14330;
-  const external = await chromium.launch({ headless: true, ...launchChannel(detectChannel()), args: [`--remote-debugging-port=${cdpPort}`] });
-  try {
-    const userPage = await external.newPage(); await userPage.setContent('<title>user tab</title><p>mine</p>');
-    const session = new BrowserSession({ demoOrigin: origin, headless: true, mode: 'cdp', cdpURL: `http://127.0.0.1:${cdpPort}` });
-    await session.open(); await session.navigate(origin + '/demo');
-    assert.equal(session.pages().length, 1);
-    assert.ok(!session.tabs().some(t => t.url === userPage.url() && t.url !== session.current().url()));
-    assert.match(await getTool('read_page').run({ filter: 'interactive', max_chars: 20000 }, { browser: session }).then(r => r.text), /搜索产品/);
-    await assert.rejects(session.navigate(`http://localhost:${port}/api/state`));
-    await session.close();
-    assert.ok(external.isConnected(), 'external browser still running');
-    assert.equal(userPage.isClosed(), false);
-    assert.equal(await userPage.title(), 'user tab');
-  } finally { await external.close(); }
+test('removed browser mode is rejected before launching a browser', () => {
+  assert.throws(() => new BrowserSession({ mode: 'cdp' }), /浏览器模式不受支持/);
 });
 
 test('application validates input and never returns a configured key', async () => {
   assert.equal((await post('tasks', { goal: '' })).status, 400);
+  assert.equal((await post('config', { provider: 'anthropic', model: 'removed-model' })).status, 400);
   await configureOpenAI();
   assert.ok(!JSON.stringify((await get('state')).body).includes('test-secret'));
   const changed = await post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/other`, model: 'test', apiKey: '' });
   assert.equal(changed.body.hasKey, false);
   await configureOpenAI();
-  assert.equal((await post('browser', { mode: 'cdp', cdpURL: 'http://example.com:9222', allowLocalhost: true, allowPrivateNetwork: false })).status, 200);
-  const browserCfg = await post('browser', { mode: 'ephemeral', cdpURL: '', allowLocalhost: false, allowPrivateNetwork: false });
+  assert.equal((await post('browser', { mode: 'cdp', allowLocalhost: true, allowPrivateNetwork: false })).status, 400);
+  const browserCfg = await post('browser', { mode: 'ephemeral', allowLocalhost: false, allowPrivateNetwork: false });
   assert.equal(browserCfg.body.browser.allowLocalhost, false);
   const unrestricted = await start({ startURL: origin + '/demo', permissionMode: undefined });
   assert.equal(unrestricted.status, 202);
@@ -335,8 +261,8 @@ test('application validates input and never returns a configured key', async () 
   assert.equal(agent.task.permissionMode, 'skip');
   assert.match(agent.task.result, /399/);
   await settle();
-  await post('browser', { mode: 'ephemeral', cdpURL: '', allowLocalhost: true, allowPrivateNetwork: false });
-  const switched = await post('config', { provider: 'anthropic', model: 'claude-opus-5-5' });
+  await post('browser', { mode: 'ephemeral', allowLocalhost: true, allowPrivateNetwork: false });
+  const switched = await post('config', { provider: 'deepseek', model: 'deepseek-test' });
   assert.equal(switched.body.hasKey, false, 'switching provider drops the key');
   await configureOpenAI();
 });
@@ -521,27 +447,6 @@ test('model HTTP errors back off and stop after six consecutive failures without
   await settle();
 });
 
-test('Anthropic provider drives the loop through the SDK stream', async () => {
-  await post('config', { provider: 'anthropic', baseURL: `http://127.0.0.1:${anthropicPort}`, model: 'claude-opus-5-5', apiKey: 'sk-test', effort: 'medium' });
-  anthropicRequests = [];
-  await start({ permissionMode: 'skip' }); await until(() => !agent.busy);
-  assert.equal(agent.task.status, 'done', agent.task.result); assert.match(agent.task.result, /399/);
-  const [first, second] = anthropicRequests;
-  assert.match(first.url, /^\/v1\/messages/);
-  assert.equal(first.headers['x-api-key'], 'sk-test');
-  assert.match(first.headers['anthropic-beta'], /thinking-display-updates-2026-08-18/);
-  assert.equal(first.body.model, 'claude-opus-5-5'); assert.equal(first.body.stream, true);
-  assert.deepEqual(first.body.output_config, { effort: 'medium' });
-  assert.equal(first.body.fallbacks, undefined, 'no fallbacks behind a custom base URL');
-  assert.ok(first.body.tools.some(t => t.name === 'read_page' && t.input_schema.type === 'object'));
-  const result = second.body.messages.at(-1).content[0];
-  assert.equal(result.type, 'tool_result'); assert.equal(result.tool_use_id, 'toolu_1');
-  assert.match(result.content[0].text, /搜索产品/);
-  // History is append-only: the second request starts with the first request's messages.
-  assert.deepEqual(second.body.messages[0], first.body.messages[0]);
-  assert.ok(agent.task.events.some(e => e.kind === 'assistant' && e.message.includes('先看看页面')));
-  await settle(); await configureOpenAI();
-});
 
 test('bundled demo runs the real browser tool loop without HTTP hosting or a model', async () => {
   const beforeRequests = requests;

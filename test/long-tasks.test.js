@@ -31,14 +31,14 @@ test('compaction preserves recent OpenAI tool pairs and archives the original hi
   assert.ok(context.stats.estimatedTokens < 26000);
 });
 
-test('Anthropic compaction keeps result blocks paired; summary failure uses retrievable excerpts', async () => {
+test('compaction summary failure keeps OpenAI tool pairs and retrievable excerpts', async () => {
   const context = new ContextManager({ contextWindow: 30000, outputReserve: 4000 });
   context.attach({ summary: async () => { throw new Error('unavailable'); } });
   const messages = [{ role: 'user', content: [{ type: 'text', text: 'goal' }] }];
-  for (let i = 0; i < 16; i++) messages.push({ role: 'assistant', content: [{ type: 'tool_use', id: String(i), name: 'read_page', input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: String(i), content: [{ type: 'text', text: 'x'.repeat(1800) }] }] });
+  for (let i = 0; i < 16; i++) messages.push({ role: 'assistant', content: null, tool_calls: [{ id: String(i) }] }, { role: 'tool', tool_call_id: String(i), content: 'x'.repeat(1800) });
   await context.prepare(messages, {}, signal());
   assert.equal(context.compactions, 1);
-  for (let i = 1; i < messages.length; i++) if (messages[i].content?.[0]?.type === 'tool_result') assert.equal(messages[i-1].content[0].id, messages[i].content[0].tool_use_id);
+  for (let i = 1; i < messages.length; i++) if (messages[i].role === 'tool') assert.equal(messages[i-1].tool_calls[0].id, messages[i].tool_call_id);
   assert.match(messages[0].content, /memory-1/);
 });
 
