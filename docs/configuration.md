@@ -35,7 +35,7 @@ Key 以明文保存在本机 `model-config.json`，写入时使用文件权限 `
 | `OBU_API_TOKEN` | HTTP Bearer Token，至少 32 个非空白字符；开启 API 时必填 |
 | `PORT` | `4318`，本机扩展中继端口，不是 API 端口 |
 | `OBU_DESKTOP_PORT` | 桌面自带后台优先使用该端口，再取 `PORT`、4318；占用时启动失败，不自动换端口；扩展自动连接要求使用 4318 |
-| `OBU_SERVICE_URL` | 可选的显式服务地址覆盖，不包含 `/v1`；此时使用 `OBU_API_TOKEN`。默认从同一数据目录自动发现，无需设置 |
+| `OBU_SERVICE_URL` | 可选的显式服务地址覆盖，不包含 `/v1`；此时使用 `OBU_API_TOKEN`。默认按本机中继端口及当前数据目录自动发现，无需设置 |
 | `OBU_PUBLISH_HOST` / `OBU_PUBLISH_PORT` | Compose 发布地址，默认 `127.0.0.1:4319`，不是 Node 服务的监听配置 |
 
 桌面和独立服务都不会在中继端口冲突时自动换端口。扩展固定连接 `127.0.0.1:4318`；使用扩展时保持 `PORT` / `OBU_DESKTOP_PORT` 为 4318 或不设置。自定义中继端口仅适用于不使用扩展的场景。HTTP Token 与模型 Key 分别管理；扩展无需配置令牌。部署与 Windows 启动命令见 [服务部署](service.md)。
@@ -53,7 +53,7 @@ Key 以明文保存在本机 `model-config.json`，写入时使用文件权限 `
 
 `~` 表示当前用户目录；Windows 默认位于用户主目录下的 `.openbrowseruse`。**修改 `OBU_DATA_DIR` 不会改变默认 `BROWSER_PROFILE_DIR`**。多个实例必须分开应用数据目录，也不能同时打开同一个持久化浏览器目录。
 
-应用数据包括 `model-config.json`、`sessions.db`、`queue-key`、`permissions.json` 和运行时锁。运行中的 HTTP 服务还会写入 `runtime-service.json`，其中包含本机地址和 API Token，供同一用户的 Electron 自动连接；文件以 `0600` 创建，正常停止时删除，不应分享或提交仓库。Windows 文件访问依赖用户目录 ACL。备份时先停止拥有数据的后台，再保存数据目录；需要登录状态时另行备份浏览器配置目录。队列负载使用 `queue-key` 加密，不要只备份数据库或单独删除密钥。
+应用数据包括 `model-config.json`、`sessions.db`、`queue-key`、`permissions.json` 和运行时锁。运行中的 HTTP 服务还会写入 `runtime-service.json`，其中包含本机地址和 API Token，并同步发布到 `~/.openbrowseruse/services/relay-<中继端口>.json`，供同一用户的 Electron 跨数据目录自动连接；文件以 `0600` 创建，正常停止时删除，不应分享或提交仓库。Windows 文件访问依赖用户目录 ACL。备份时先停止拥有数据的后台，再保存数据目录；需要登录状态时另行备份浏览器配置目录。队列负载使用 `queue-key` 加密，不要只备份数据库或单独删除密钥。
 
 生命周期设置由桌面或 API 管理：历史保留默认 0 天（永久）、闲置超时 900 秒、最多等待 100 项任务，详见 [会话清理](api.md#会话清理)。
 

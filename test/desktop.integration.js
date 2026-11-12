@@ -258,7 +258,7 @@ test('Electron automatically attaches to an existing service and leaves its task
     OBU_API_ENABLED: '1', OBU_API_PORT: '0', OBU_API_TOKEN: token, MODEL_PROVIDER: 'openai', MODEL_NAME: 'attached-fixture', MODEL_API_KEY: 'fixture', MODEL_BASE_URL: `http://127.0.0.1:${mock.address().port}/v1`,
   } });
   const origin = `http://127.0.0.1:${runtime.httpPort}`;
-  const env = { ...process.env, OBU_DATA_DIR: join(dir, 'data'), OBU_DESKTOP_USER_DATA: join(dir, 'electron'), OBU_DESKTOP_TEST: '1' };
+  const env = { ...process.env, OBU_DATA_DIR: join(dir, 'desktop-data'), OBU_DESKTOP_PORT: String(runtime.port), OBU_DESKTOP_USER_DATA: join(dir, 'electron'), OBU_DESKTOP_TEST: '1' };
   delete env.OBU_SERVICE_URL; delete env.OBU_API_TOKEN;
   delete env.ELECTRON_RUN_AS_NODE;
   const launch = () => electron.launch({ ...(process.env.OBU_ELECTRON_EXECUTABLE ? { executablePath: process.env.OBU_ELECTRON_EXECUTABLE, args: [] } : { args: [resolve('.')] }), env, timeout: 30000 });

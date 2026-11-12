@@ -66,3 +66,37 @@ test('refused stale discovery falls back, explicit service URL failures do not',
   await desktop.close();
   await rm(env.OBU_DATA_DIR, { recursive: true, force: true });
 });
+
+test('desktop finds a service in another data directory through its relay port', async t => {
+  const env = await setup(t);
+  const serviceDir = join(env.OBU_DATA_DIR, 'service');
+  const service = await startRuntime({ port: 0, dataDir: serviceDir, env: { OBU_API_ENABLED: '1', OBU_API_PORT: '0', OBU_API_TOKEN: token } });
+  let desktop;
+  t.after(async () => { await desktop?.close(); await service.close(); await rm(env.OBU_DATA_DIR, { recursive: true, force: true }); });
+  desktop = await startDesktopRuntime({ ...env, OBU_DESKTOP_PORT: String(service.port) });
+  assert.equal((await desktop.api.request('GET', '/api/state')).body.service.ownership, 'external');
+  assert.equal(desktop.origin, `http://127.0.0.1:${service.httpPort}`);
+  await desktop.close();
+  assert.equal((await fetch(desktop.origin + '/readyz')).status, 200);
+});
+
+test('desktop retries discovery when service startup temporarily occupies the relay', async t => {
+  const env = await setup(t);
+  const blocker = createServer();
+  await new Promise(resolve => blocker.listen(0, '127.0.0.1', resolve));
+  const port = blocker.address().port;
+  let service, desktop;
+  const starting = new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      try {
+        await new Promise(done => blocker.close(done));
+        service = await startRuntime({ port, dataDir: join(env.OBU_DATA_DIR, 'service'), env: { OBU_API_ENABLED: '1', OBU_API_PORT: '0', OBU_API_TOKEN: token } });
+        resolve();
+      } catch (error) { reject(error); }
+    }, 300);
+  });
+  t.after(async () => { await starting; await desktop?.close(); await service?.close(); await rm(env.OBU_DATA_DIR, { recursive: true, force: true }); });
+  desktop = await startDesktopRuntime({ ...env, OBU_DESKTOP_PORT: String(port) });
+  await starting;
+  assert.equal((await desktop.api.request('GET', '/api/state')).body.service.ownership, 'external');
+});

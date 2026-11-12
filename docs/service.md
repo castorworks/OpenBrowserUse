@@ -31,13 +31,13 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 服务和 Chrome 都在本机时，可以在 `.env` 设置 `BROWSER_MODE=extension`，直接运行 `npm run start:service`。在 Chrome 加载 `extension/` 目录后，扩展自动连接 `127.0.0.1:4318`，无需输入地址或令牌。保持中继端口为 4318；未启动服务时侧边栏显示“等待本机服务”，服务启动后自动重连。标准 API 仍要求 `OBU_API_TOKEN`。Chrome 和扩展保持运行，外部调用方仍使用 HTTP API 端口 4319。
 
-同一台机器只运行一套供扩展连接的后台；端口已占用时不会自动切换。若独立服务已经运行，桌面会自动连接同一用户数据目录中的服务。
+同一台机器只运行一套供扩展连接的后台；端口已占用时不会自动切换。若独立服务已经运行，桌面会自动连接同一用户的本机服务。
 
 若已经保存过浏览器设置，先在桌面修改为扩展模式，环境变量不会覆盖正常的已保存配置。旧 CDP、Anthropic 配置的处理见 [升级与迁移](migration.md)。模型参数见 [配置参考](configuration.md)。
 
 ## Electron 连接已运行的本机服务（含 Windows）
 
-直接启动 Electron 即可。它先读取同一用户数据目录中的本机服务记录：
+直接启动 Electron 即可。它先按中继端口查询用户级服务索引，再查询当前数据目录中的服务记录：
 
 - 找到服务：自动使用记录中的本机地址和凭据连接，不启动第二个后台。退出桌面仅断开连接，服务、浏览器和任务继续运行。
 - 没有服务（或遗留记录对应的服务已退出）：启动并拥有自己的后台，退出应用时关闭。若设置 `OBU_API_ENABLED=1`，自带后台同时提供标准 API。
@@ -55,9 +55,9 @@ npm run start:service
 npm start
 ```
 
-默认双方使用 `~/.openbrowseruse`，无需设置 `OBU_SERVICE_URL` 或重复填写 Token。若服务自定义 `OBU_DATA_DIR`，桌面也应使用相同目录；`npm start` 不自动读取 `.env`，自定义目录需由终端环境传入。仅绑定非本机网卡的服务和容器内的数据目录不参与默认自动发现。
+默认双方使用 `~/.openbrowseruse`，无需设置 `OBU_SERVICE_URL` 或重复填写 Token。服务可使用自定义 `OBU_DATA_DIR`，桌面通过用户级索引自动找到它，无需使用相同目录。默认按 4318 中继端口查找；自定义中继端口时桌面需使用相同 `PORT` / `OBU_DESKTOP_PORT`。仅绑定非本机网卡的服务和容器内的数据目录不参与默认自动发现。
 
-服务就绪后将本机地址、PID 和 API Token 写入数据目录中的 `runtime-service.json`（创建权限 `0600`），正常停止时删除。凭据只供本机用户的后台进程读取，不传给 renderer、不通过 API 返回。外部 API 调用仍必须提供 Bearer Token。Windows 上请使用当前用户私有的数据目录。
+服务就绪后将本机地址、PID 和 API Token 写入数据目录中的 `runtime-service.json`，同时写入 `~/.openbrowseruse/services/relay-<端口>.json` 用户级索引（文件创建权限 `0600`），正常停止时删除。端口或数据目录被占用时，桌面会短暂重试发现，兼容服务正在启动的情况。凭据只供本机用户的后台进程读取，不传给 renderer、不通过 API 返回。外部 API 调用仍必须提供 Bearer Token。Windows 上请使用当前用户私有的数据目录。
 
 `OBU_SERVICE_URL` 仍可作为高级选项指定其他数据目录中的服务，需同时设置对应 `OBU_API_TOKEN`。只接受本机 HTTP 根地址（127.0.0.1、localhost 或 ::1），不含 `/v1`；显式指定但连接失败时不会回退到自带后台。
 
