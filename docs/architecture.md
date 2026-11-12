@@ -44,7 +44,7 @@ Session 表示浏览器会话，Run 表示一次目标执行，Job 表示排队�
 
 ## 服务所有权
 
-默认 Electron utility process 拥有运行时。设置 `OBU_SERVICE_URL` 后，该进程只充当客户端；不会打开服务数据库、申请锁或停止服务。两种方式复用相同 renderer 和 IPC 白名单。
+Electron utility process 先由 `desktop-runtime.js` 读取同一数据目录的服务记录，自动连接已有服务；未发现服务时才创建并拥有运行时。HTTP 服务就绪后由 `service-discovery.js` 原子写入私有连接记录，停止时移除。发现已有服务后，该进程只充当客户端，不会打开服务数据库、申请锁或停止服务。`OBU_SERVICE_URL` 保留为显式覆盖，两种方式复用相同 renderer 和 IPC 白名单。
 
 独立服务断线重连使用完整状态快照，不补发命令；运行事件的可靠回放仍通过公开的每 Run SSE 接口提供。
 

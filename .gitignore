@@ -9,3 +9,7 @@ model-config.json.*.tmp
 
 # Desktop build output
 dist/
+
+# Local service discovery includes API credentials
+runtime-service.json
+runtime-service.json.*.tmp

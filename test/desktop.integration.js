@@ -239,7 +239,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await desktop.close(); desktop = null;
 });
 
-test('Electron attaches to an existing service and leaves its task running on exit', { timeout: 60000 }, async t => {
+test('Electron automatically attaches to an existing service and leaves its task running on exit', { timeout: 60000 }, async t => {
   const { startRuntime } = await import('../lib/runtime.js');
   const dir = await mkdtemp(join(tmpdir(), 'obu-desktop-attached-'));
   const token = 'desktop-attached-service-test-token-123456789';
@@ -258,7 +258,8 @@ test('Electron attaches to an existing service and leaves its task running on ex
     OBU_API_ENABLED: '1', OBU_API_PORT: '0', OBU_API_TOKEN: token, MODEL_PROVIDER: 'openai', MODEL_NAME: 'attached-fixture', MODEL_API_KEY: 'fixture', MODEL_BASE_URL: `http://127.0.0.1:${mock.address().port}/v1`,
   } });
   const origin = `http://127.0.0.1:${runtime.httpPort}`;
-  const env = { ...process.env, OBU_SERVICE_URL: origin, OBU_API_TOKEN: token, OBU_DATA_DIR: join(dir, 'data'), OBU_DESKTOP_USER_DATA: join(dir, 'electron'), OBU_DESKTOP_TEST: '1' };
+  const env = { ...process.env, OBU_DATA_DIR: join(dir, 'data'), OBU_DESKTOP_USER_DATA: join(dir, 'electron'), OBU_DESKTOP_TEST: '1' };
+  delete env.OBU_SERVICE_URL; delete env.OBU_API_TOKEN;
   delete env.ELECTRON_RUN_AS_NODE;
   const launch = () => electron.launch({ ...(process.env.OBU_ELECTRON_EXECUTABLE ? { executablePath: process.env.OBU_ELECTRON_EXECUTABLE, args: [] } : { args: [resolve('.')] }), env, timeout: 30000 });
   desktop = await launch();

@@ -1,5 +1,4 @@
-import { ServiceClient } from '../lib/service-client.js';
-import { startRuntime } from '../lib/runtime.js';
+import { startDesktopRuntime } from '../lib/desktop-runtime.js';
 
 const parent = process.parentPort;
 if (!parent) throw new Error('Desktop backend must run as an Electron utility process.');
@@ -25,15 +24,7 @@ parent.on('message', async ({ data }) => {
   } catch (error) { send({ type: 'response', id: data.id, status: 500, body: { error: error.message } }); }
 });
 try {
-  if (process.env.OBU_SERVICE_URL) {
-    const client = await ServiceClient.connect({ url: process.env.OBU_SERVICE_URL, token: process.env.OBU_API_TOKEN });
-    runtime = { api: client, origin: client.origin, close: () => client.close() };
-  } else {
-    runtime = await startRuntime({
-      port: Number(process.env.OBU_DESKTOP_PORT ?? process.env.PORT ?? 4318), fallbackPort: false,
-      browserOptions: { headless: process.env.BROWSER_HEADLESS === '1' },
-    });
-  }
+  runtime = await startDesktopRuntime();
   unsubscribe = runtime.api.subscribe((event, data) => {
     if (event === 'desktop-focus') send({ type: 'desktop-focus' });
     else if (event === 'state' || event === 'pointer' || event === 'offline') send({ type: 'event', event, data });

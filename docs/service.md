@@ -31,16 +31,17 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 服务和 Chrome 都在本机时，可以在 `.env` 设置 `BROWSER_MODE=extension`，直接运行 `npm run start:service`。在 Chrome 加载 `extension/` 目录后，扩展自动连接 `127.0.0.1:4318`，无需输入地址或令牌。保持中继端口为 4318；未启动服务时侧边栏显示“等待本机服务”，服务启动后自动重连。标准 API 仍要求 `OBU_API_TOKEN`。Chrome 和扩展保持运行，外部调用方仍使用 HTTP API 端口 4319。
 
-同一台机器只运行一套供扩展连接的后台；端口已占用时不会自动切换。若独立服务已经运行，桌面通过下文的 `OBU_SERVICE_URL` 连接它。
+同一台机器只运行一套供扩展连接的后台；端口已占用时不会自动切换。若独立服务已经运行，桌面会自动连接同一用户数据目录中的服务。
 
 若已经保存过浏览器设置，先在桌面修改为扩展模式，环境变量不会覆盖正常的已保存配置。旧 CDP、Anthropic 配置的处理见 [升级与迁移](migration.md)。模型参数见 [配置参考](configuration.md)。
 
 ## Electron 连接已运行的本机服务（含 Windows）
 
-Electron 有两种启动方式：
+直接启动 Electron 即可。它先读取同一用户数据目录中的本机服务记录：
 
-- 未设置 `OBU_SERVICE_URL`：桌面启动并拥有自己的后台，退出应用时关闭该后台。若设置 `OBU_API_ENABLED=1`，此后台同时提供标准 API。
-- 设置 `OBU_SERVICE_URL`：桌面连接已运行的本机标准服务，不再启动第二个运行时，也不占用该服务的数据目录锁。退出桌面仅断开连接，服务、浏览器和任务继续运行。
+- 找到服务：自动使用记录中的本机地址和凭据连接，不启动第二个后台。退出桌面仅断开连接，服务、浏览器和任务继续运行。
+- 没有服务（或遗留记录对应的服务已退出）：启动并拥有自己的后台，退出应用时关闭。若设置 `OBU_API_ENABLED=1`，自带后台同时提供标准 API。
+- 已发现服务但鉴权失败、协议不兼容或连接超时：明确报错，不启动替代后台。
 
 Windows PowerShell 示例，先在一个终端启动服务（提前配置 `.env` 中的模型和 API Token）：
 
@@ -48,19 +49,19 @@ Windows PowerShell 示例，先在一个终端启动服务（提前配置 `.env`
 npm run start:service
 ```
 
-在另一个终端启动桌面：
+另一个终端直接启动桌面，也可双击打包应用：
 
 ```powershell
-$env:OBU_SERVICE_URL = 'http://127.0.0.1:4319'
-$env:OBU_API_TOKEN = '填写与服务一致的API令牌'
 npm start
-# 打包应用也可从这个终端启动，例如：
-# & 'C:\Applications\Open Browser Use\Open Browser Use.exe'
 ```
 
-连接模式只接受本机 HTTP 根地址（127.0.0.1、localhost 或 ::1）；不要填写 `/v1`。Token 留在 Electron 后台进程，不传给页面。界面顶部显示“已连接独立服务”，悬停可查看地址及退出行为。
+默认双方使用 `~/.openbrowseruse`，无需设置 `OBU_SERVICE_URL` 或重复填写 Token。若服务自定义 `OBU_DATA_DIR`，桌面也应使用相同目录；`npm start` 不自动读取 `.env`，自定义目录需由终端环境传入。仅绑定非本机网卡的服务和容器内的数据目录不参与默认自动发现。
 
-服务暂时断开时，桌面会提示并自动重新订阅最新状态、画面和代理光标。不会自动重发开始任务、点击批准等命令；请求超时后先查询状态，避免重复执行。没有运行服务、地址错误或令牌不匹配时启动会报错，不会偷偷创建另一个后台。要恢复桌面自带后台模式，在启动前执行 `Remove-Item Env:OBU_SERVICE_URL`。
+服务就绪后将本机地址、PID 和 API Token 写入数据目录中的 `runtime-service.json`（创建权限 `0600`），正常停止时删除。凭据只供本机用户的后台进程读取，不传给 renderer、不通过 API 返回。外部 API 调用仍必须提供 Bearer Token。Windows 上请使用当前用户私有的数据目录。
+
+`OBU_SERVICE_URL` 仍可作为高级选项指定其他数据目录中的服务，需同时设置对应 `OBU_API_TOKEN`。只接受本机 HTTP 根地址（127.0.0.1、localhost 或 ::1），不含 `/v1`；显式指定但连接失败时不会回退到自带后台。
+
+连接成功后顶部显示“已连接独立服务”。服务暂时断开时，桌面自动重新订阅状态、画面和代理光标，不重发命令，也不改为启动自带后台。需要切回自带后台时先停止独立服务、清除显式 `OBU_SERVICE_URL`（若有），再重新打开 Electron。
 
 桌面桥接使用 `/internal/desktop/v1/request` 与 `/internal/desktop/v1/events`，与标准业务 API 共享鉴权和请求体上限，并额外限制为本机连接及允许的操作清单。桥接不提供服务退出命令；它是内部桌面协议，不替代外部系统使用的 `/v1` API。桌面桥接命令不自动重试，也不使用业务 API 的幂等键约定。
 
