@@ -85,14 +85,14 @@ afterEach(async () => { await settle(); mockMode = 'normal'; reviewerVerdict = '
 after(async () => { await settle(); await browser?.close(); await Promise.all([server, openaiServer, siteServer].map(s => new Promise(r => s.close(r)))); await api.close(); await rm(dataDir, { recursive: true, force: true }); });
 
 test('URL guard, endpoints, key names and tool schemas', () => {
-  assert.equal(allowedURL('file:///tmp/example', origin), 'file:///tmp/example');
-  assert.equal(allowedURL(origin + '/api/state', origin), origin + '/api/state');
-  assert.equal(allowedURL('http://10.0.0.1', origin), 'http://10.0.0.1/');
-  assert.equal(allowedURL('http://2130706433:3000', origin), 'http://127.0.0.1:3000/', 'localhost dev servers allowed by default');
-  assert.equal(allowedURL('http://localhost:3000', origin, { allowLocalhost: false }), 'http://localhost:3000/');
-  for (const own of [`http://localhost:${port}/api/state`, `http://0.0.0.0:${port}/api/state`, `http://[::1]:${port}/`, `http://127.0.0.2:${port}/demo`]) assert.equal(allowedURL(own, origin), new URL(own).href);
-  assert.equal(allowedURL('http://192.168.1.5/', origin, { allowLocalhost: true, allowPrivateNetwork: true }), 'http://192.168.1.5/');
-  assert.equal(allowedURL(origin + '/demo', origin), origin + '/demo');
+  assert.equal(allowedURL('file:///tmp/example'), 'file:///tmp/example');
+  assert.equal(allowedURL(origin + '/api/state'), origin + '/api/state');
+  assert.equal(allowedURL('http://10.0.0.1'), 'http://10.0.0.1/');
+  assert.equal(allowedURL('http://2130706433:3000'), 'http://127.0.0.1:3000/', 'localhost dev servers allowed by default');
+  assert.equal(allowedURL('http://localhost:3000'), 'http://localhost:3000/');
+  for (const own of [`http://localhost:${port}/api/state`, `http://0.0.0.0:${port}/api/state`, `http://[::1]:${port}/`, `http://127.0.0.2:${port}/demo`]) assert.equal(allowedURL(own), new URL(own).href);
+  assert.equal(allowedURL('http://192.168.1.5/'), 'http://192.168.1.5/');
+  assert.equal(allowedURL(origin + '/demo'), origin + '/demo');
   assert.equal(apiEndpoint('https://example.com/v1/'), 'https://example.com/v1/chat/completions');
   assert.throws(() => apiEndpoint('http://example.com/v1'));
   assert.equal(normalizeKey('ctrl+a'), 'Control+a'); assert.equal(normalizeKey('cmd+shift+T'), 'Meta+Shift+T'); assert.equal(normalizeKey('enter'), 'Enter');
@@ -254,7 +254,8 @@ test('application validates input and never returns a configured key', async () 
   await configureOpenAI();
   assert.equal((await post('browser', { mode: 'cdp', allowLocalhost: true, allowPrivateNetwork: false })).status, 400);
   const browserCfg = await post('browser', { mode: 'ephemeral', allowLocalhost: false, allowPrivateNetwork: false });
-  assert.equal(browserCfg.body.browser.allowLocalhost, false);
+  assert.equal(browserCfg.body.browser.allowLocalhost, undefined);
+  assert.equal(browserCfg.body.browser.allowPrivateNetwork, undefined);
   const unrestricted = await start({ startURL: origin + '/demo', permissionMode: undefined });
   assert.equal(unrestricted.status, 202);
   await until(() => !agent.busy);

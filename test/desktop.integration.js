@@ -212,7 +212,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await panel.locator('#open-desktop').click();
   await until(() => desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()));
   await panel.close();
-  await api('browser', { mode: 'extension', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: [] });
+  await api('browser', { mode: 'extension', blockedSites: [] });
   await api('tasks', { goal: '验证桌面应用连接真实 Chrome 扩展', startURL: siteURL });
   await until(async () => { const s = await api('state'); return s.task.status === 'done' && !s.busy; });
   assert.match((await api('state')).task.result, /桌面模型测试完成/);

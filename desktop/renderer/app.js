@@ -30,7 +30,7 @@ function syncBrowserMode() {
 }
 function showBrowserConfig(b) {
   $('blocked-sites').value = (b.blockedSites || []).join('\n');
-  $('browser-mode').value = b.mode; $('browser-migration').hidden = !b.requiresSelection; $('allow-localhost').checked = b.allowLocalhost; $('allow-private').checked = b.allowPrivateNetwork;
+  $('browser-mode').value = b.mode; $('browser-migration').hidden = !b.requiresSelection;
   $('browser-badge').textContent = browserModes[b.mode]; syncBrowserMode();
 }
 function showConfig(config) {
@@ -443,7 +443,7 @@ handle('save-config', async () => {
 });
 $('browser-mode').addEventListener('change', syncBrowserMode);
 async function saveBrowser(message) {
-  const config = await api('browser', { mode: $('browser-mode').value, allowLocalhost: $('allow-localhost').checked, allowPrivateNetwork: $('allow-private').checked, blockedSites: $('blocked-sites').value.split(/\s+/).map(x => x.trim()).filter(Boolean) });
+  const config = await api('browser', { mode: $('browser-mode').value, blockedSites: $('blocked-sites').value.split(/\s+/).map(x => x.trim()).filter(Boolean) });
   showBrowserConfig(config.browser);
   $('model-migration').hidden = !config.modelRequiresSelection; toast(message);
 }

@@ -49,7 +49,7 @@ import { trimImages } from '../lib/providers/budget.js';
 test('browser settings and protected sites survive a fresh store', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'obu-browser-config-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const browser = { mode: 'extension', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: ['protected.example'] };
+  const browser = { mode: 'extension', blockedSites: ['protected.example'] };
   new ConfigStore({ dir }).save({ provider: 'openai', baseURL: 'http://localhost', model: 'test', apiKey: '', effort: 'high', vision: false, reviewerModel: '', browser });
   assert.deepEqual(new ConfigStore({ dir }).load().browser, browser);
 });
@@ -89,7 +89,7 @@ test('legacy direct connection config requires a new browser selection without l
   assert.equal(config.apiKey, 'preserved');
   assert.equal(config.browser.requiresSelection, true);
   assert.equal('cdpURL' in config.browser, false);
-  store.save({ ...config, browser: { mode: 'extension', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: [] } });
+  store.save({ ...config, browser: { mode: 'extension', blockedSites: [] } });
   assert.equal(store.load().browser.mode, 'extension');
   assert.equal(store.load().browser.requiresSelection, undefined);
 });

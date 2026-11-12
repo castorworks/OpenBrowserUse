@@ -51,3 +51,26 @@ test('invalid configuration fails without exposing secrets or overwriting the fi
     assert.match(await readFile(file, 'utf8'), /fixture-secret/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+
+test('obsolete browser flags are discarded from saved settings and older desktop requests', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'obu-config-browser-'));
+  let api;
+  try {
+    api = createApplication({ env: {}, dataDir: dir });
+    const response = await api.request('POST', '/api/browser', { mode: 'persistent', blockedSites: ['protected.example'], allowLocalhost: false, allowPrivateNetwork: false });
+    assert.equal(response.status, 200);
+    const browser = { mode: 'persistent', blockedSites: ['protected.example'] };
+    assert.deepEqual(response.body.browser, browser);
+    const file = join(dir, 'model-config.json');
+    const saved = JSON.parse(await readFile(file, 'utf8'));
+    assert.deepEqual(saved.browser, browser);
+    await api.close(); api = null;
+    await writeFile(file, JSON.stringify({ ...saved, browser: { ...browser, allowLocalhost: false, allowPrivateNetwork: false } }));
+    api = createApplication({ env: {}, dataDir: dir });
+    assert.deepEqual((await api.request('GET', '/api/state')).body.config.browser, browser);
+    const current = await api.request('POST', '/api/browser', browser);
+    assert.equal(current.status, 200);
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).browser, browser);
+  } finally { await api?.close(); await rm(dir, { recursive: true, force: true }); }
+});

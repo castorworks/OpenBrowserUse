@@ -171,10 +171,7 @@
     <div class="callout browser-persistent"><p>专用配置保存在本机，与个人 Chrome 分开。先打开登录浏览器手动登录需要的网站，关闭后再执行任务。</p>
       <div class="button-row"><button class="btn" id="login-open">打开登录浏览器</button><button class="btn" id="login-close" hidden>关闭登录浏览器</button></div></div>
     <p id="browser-migration" class="callout" hidden>直接 CDP 模式已移除。请选择并保存新的浏览器模式后再执行任务。使用现有 Chrome 登录状态请选择 Chrome 扩展。</p>
-    <div class="field"><span class="field-label">可访问的地址</span>
-      <label class="check"><input id="allow-localhost" type="checkbox" disabled>允许访问 localhost（本机开发服务器）</label>
-      <label class="check"><input id="allow-private" type="checkbox" disabled>允许访问内网地址（192.168.x.x 等）</label>
-      <p class="hint">地址访问不受限制；旧选项仅为兼容保留，不再生效。</p></div>
+    <p class="hint">浏览器可访问 localhost 和内网地址；代理仍会阻断已识别的本机管理接口。</p>
     <p class="hint" id="browser-locked" hidden>浏览器正在使用中。关闭浏览器或停止任务后才能修改这些设置。</p>
     <button class="btn btn-primary btn-block" id="save-browser">保存浏览器设置</button>
   </section>

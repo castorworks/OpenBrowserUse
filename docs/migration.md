@@ -32,4 +32,4 @@
 
 不要同时启动两个共享应用数据目录的后台。接入模式下 Electron 不打开服务数据库或申请运行时锁。
 
-旧的地址访问权限开关及 `MCP_ALLOW_JAVASCRIPT` 已不再控制工具执行；当前权限行为见 [桌面权限说明](desktop.md) 和 [MCP 接入](mcp.md)。
+旧的 localhost / 内网访问开关已从界面、保存配置和浏览器参数中移除；读取旧配置时忽略这些字段，旧桌面发送的字段仍可被接收但不保存。`BROWSER_ALLOW_LOCALHOST`、`BROWSER_ALLOW_PRIVATE` 及 `MCP_ALLOW_JAVASCRIPT` 不再控制工具执行；当前权限行为见 [桌面权限说明](desktop.md) 和 [MCP 接入](mcp.md)。

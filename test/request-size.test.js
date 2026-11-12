@@ -22,7 +22,7 @@ test('task input, follow-ups and control answers pass former size limits without
       assert.ok(response.status < 300, JSON.stringify(response.body));
     }
     assert.equal((await post({ goal: '   ' })).status, 400);
-    const response = await api.request('POST', '/api/browser', { mode: 'ephemeral', allowLocalhost: true, allowPrivateNetwork: false, blockedSites: Array.from({ length: 500 }, (_, i) => `${'a'.repeat(150)}${i}.example.com`) });
+    const response = await api.request('POST', '/api/browser', { mode: 'ephemeral', blockedSites: Array.from({ length: 500 }, (_, i) => `${'a'.repeat(150)}${i}.example.com`) });
     assert.equal(response.status, 200);
   } finally {
     await api.close();
