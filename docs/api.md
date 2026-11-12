@@ -2,7 +2,7 @@
 
 [返回文档导航](README.md) · [服务部署](service.md)
 
-本页描述已实现的 v1 接口（契约版本 1.2.0）。机器可读契约见 [OpenAPI 3.1.1](openapi.json)。历史提案见 [归档设计](archive/api-v1-design.md)，不属于当前接口契约。
+本页描述已实现的 v1 接口（契约版本 1.2.0）。机器可读契约见 [OpenAPI 3.1.1](openapi.json)。
 
 ## 启动
 
