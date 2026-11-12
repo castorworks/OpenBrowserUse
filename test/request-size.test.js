@@ -12,11 +12,11 @@ test('task input, follow-ups and control answers pass former size limits without
   const post = body => api.request('POST', '/api/tasks', body);
   try {
     const goal = '中'.repeat(3000000); // Over both former character and 8 MB body limits.
-    agent.start = async input => { assert.equal(input.goal, goal); assert.equal(input.maxSteps, undefined); };
+    api.tasks.startTask = async input => { assert.equal(input.goal, goal); assert.equal(input.maxSteps, undefined); };
     const accepted = await post({ goal, maxSteps: 1 }); // Legacy callers cannot reintroduce a step cap.
     assert.equal(accepted.status, 202);
-    agent.message = text => assert.equal(text, goal);
-    agent.control = (command, answer) => { assert.equal(command, 'resume'); assert.equal(answer, goal); };
+    api.tasks.sendMessage = text => assert.equal(text, goal);
+    api.tasks.controlTask = (command, answer) => { assert.equal(command, 'resume'); assert.equal(answer, goal); };
     for (const [path, body] of [['messages', { text: goal }], ['control', { command: 'resume', answer: goal }]]) {
       const response = await api.request('POST', '/api/' + path, body);
       assert.ok(response.status < 300, JSON.stringify(response.body));

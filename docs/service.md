@@ -1,20 +1,66 @@
 # 外部服务部署
 
+[返回文档导航](README.md) · [配置参考](configuration.md)
+
 服务可以独立于 Electron 运行。外部系统通过 HTTP JSON 提交任务，用轮询或 SSE 获取执行状态及结果。推荐独立任务使用 `/v1/jobs`，需要同一浏览器续聊时使用 Session/Run 接口。完整字段见 [API 文档](api.md)。
 
 ## 本机或服务器启动
 
 ```bash
 npm ci --omit=dev
+# 同一源码目录还需运行 Electron 时，改用 npm ci 安装完整依赖
 npx playwright install --with-deps chromium
 cp .env.example .env
-# 编辑 .env：配置模型名称、地址、Key，并填入 openssl rand -hex 32 生成的 API Token
+# 编辑 .env：配置模型名称、地址、Key 和 API Token
 npm run start:service
 ```
+
+Windows PowerShell 用 `Copy-Item .env.example .env` 复制配置。可用以下跨平台命令生成随机 API Token，填入 `.env` 并保存给调用方：
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+`start:service` 自动读取 `.env`；`npm run api` 和 `npm start` 不自动读取，需由终端传入变量。已有模型及浏览器配置优先于环境变量。
 
 服务默认无界面运行；`BROWSER_HEADLESS=0` 可在有桌面环境的机器上显示浏览器。默认监听 `127.0.0.1:4319`。设置 `OBU_API_HOST=0.0.0.0` 可接受其他机器的请求，也支持指定 IPv4/IPv6 地址。`OBU_API_PORT` 控制 HTTP 端口；旧 `PORT` 仍仅控制本机扩展中继，外部客户端不要使用中继端口。
 
 `OBU_DATA_DIR` 控制 SQLite、配置及队列密钥的存储位置，默认使用用户目录。建议服务使用独立数据目录；保存过的模型配置优先于环境变量。不要让多个实例共享同一目录。环境变量修改后需要重启。
+
+## 本机 Chrome 扩展模式
+
+服务和 Chrome 都在本机时，可以在 `.env` 设置 `BROWSER_MODE=extension`，直接运行 `npm run start:service`。在 Chrome 加载 `extension/` 目录，打开扩展侧边栏，将服务器地址设为 `http://127.0.0.1:4318`，配对令牌读取数据目录中的 `extension-token` 文件（默认 `~/.openbrowseruse/extension-token`）。扩展令牌与 HTTP API Token 是两个独立凭据。Chrome 和扩展保持运行，外部调用方仍使用 HTTP API 端口 4319。
+
+若已经保存过浏览器设置，先在桌面修改为扩展模式，环境变量不会覆盖正常的已保存配置。旧 CDP、Anthropic 配置的处理见 [升级与迁移](migration.md)。模型参数见 [配置参考](configuration.md)。
+
+## Electron 连接已运行的本机服务（含 Windows）
+
+Electron 有两种启动方式：
+
+- 未设置 `OBU_SERVICE_URL`：桌面启动并拥有自己的后台，退出应用时关闭该后台。若设置 `OBU_API_ENABLED=1`，此后台同时提供标准 API。
+- 设置 `OBU_SERVICE_URL`：桌面连接已运行的本机标准服务，不再启动第二个运行时，也不占用该服务的数据目录锁。退出桌面仅断开连接，服务、浏览器和任务继续运行。
+
+Windows PowerShell 示例，先在一个终端启动服务（提前配置 `.env` 中的模型和 API Token）：
+
+```powershell
+npm run start:service
+```
+
+在另一个终端启动桌面：
+
+```powershell
+$env:OBU_SERVICE_URL = 'http://127.0.0.1:4319'
+$env:OBU_API_TOKEN = '填写与服务一致的API令牌'
+npm start
+# 打包应用也可从这个终端启动，例如：
+# & 'C:\Applications\Open Browser Use\Open Browser Use.exe'
+```
+
+连接模式只接受本机 HTTP 根地址（127.0.0.1、localhost 或 ::1）；不要填写 `/v1`。Token 留在 Electron 后台进程，不传给页面。界面顶部显示“已连接独立服务”，悬停可查看地址及退出行为。
+
+服务暂时断开时，桌面会提示并自动重新订阅最新状态、画面和代理光标。不会自动重发开始任务、点击批准等命令；请求超时后先查询状态，避免重复执行。没有运行服务、地址错误或令牌不匹配时启动会报错，不会偷偷创建另一个后台。要恢复桌面自带后台模式，在启动前执行 `Remove-Item Env:OBU_SERVICE_URL`。
+
+桌面桥接使用 `/internal/desktop/v1/request` 与 `/internal/desktop/v1/events`，与标准业务 API 共享鉴权和请求体上限，并额外限制为本机连接及允许的操作清单。桥接不提供服务退出命令；它是内部桌面协议，不替代外部系统使用的 `/v1` API。桌面桥接命令不自动重试，也不使用业务 API 的幂等键约定。
 
 ## Docker Compose
 
@@ -30,7 +76,7 @@ curl http://127.0.0.1:4319/readyz
 
 默认只向宿主机 loopback 发布端口，便于在宿主机使用 HTTPS 反向代理；[Nginx 配置示例](../deploy/nginx.conf.example)关闭 SSE 缓冲。局域网直接访问可在 `.env` 设置 `OBU_PUBLISH_HOST=0.0.0.0` 后重新创建容器。外网部署应通过 HTTPS 入口传输 Bearer Token，并限制网络访问。模型 Key 只配置在服务端，不提供给调用方。
 
-容器中使用 ephemeral 浏览器即可；桌面 Chrome 扩展和宿主机登录状态不会自动进入容器。备份需要同时保存数据卷中的数据库和 `queue-key`；不要执行 `docker compose down -v`，除非确实要删除全部数据。
+容器默认使用 ephemeral 浏览器；若需要持久化登录，额外设置 `BROWSER_MODE=persistent` 和 `BROWSER_PROFILE_DIR=/data/profile`，因为 `OBU_DATA_DIR=/data` 不会改变浏览器配置目录。桌面 Chrome 扩展和宿主机登录状态不会自动进入容器；现有 Compose 也未发布扩展中继端口，需要连接宿主机 Chrome 时优先使用本机 Node 服务。备份需要同时保存数据卷中的数据库和 `queue-key`；不要执行 `docker compose down -v`，除非确实要删除全部数据。
 
 ## 外部调用
 
@@ -49,15 +95,3 @@ node --env-file=.env examples/submit-job.mjs '打开 https://example.com 并概�
 - SIGINT/SIGTERM：关闭事件流、停止后台并释放资源；最多等待 25 秒。重启不会自动重放已开始的浏览器动作，未开始的队列任务继续调度。
 
 这是单租户服务：同一个 Token 的调用方共享历史和控制权限，一个实例同时执行一个浏览器任务，其余任务排队。尚不提供租户隔离、并行浏览器池、Webhook 或浏览器直连 CORS。网页产品应由自己的后端调用本服务，避免把服务 Token 放入前端。扩容应使用独立数据目录的实例，由上游按 Session 粘性路由，不能直接把续聊请求随机分配到多个实例。
-
-## 本机 Chrome 扩展模式
-
-服务和 Chrome 都在本机时，可以在 `.env` 设置 `BROWSER_MODE=extension`，直接运行 `npm run start:service`。在 Chrome 加载 `extension/` 目录，打开扩展侧边栏，将服务器地址设为 `http://127.0.0.1:4318`，配对令牌读取数据目录中的 `extension-token` 文件（默认 `~/.openbrowseruse/extension-token`）。扩展令牌与 HTTP API Token 是两个独立凭据。Chrome 和扩展保持运行，外部调用方仍使用 HTTP API 端口 4319。
-
-直接 CDP 连接模式已移除。旧配置不会自动换用另一个浏览器执行任务：桌面用户需要在浏览器设置中重新选择并保存模式；独立服务可显式设置 `BROWSER_MODE=extension|persistent|ephemeral` 完成旧配置迁移。`BROWSER_MODE=cdp` 会提示错误，`BROWSER_CDP_URL` 不再使用。旧历史保留原模式名称；尚未执行的旧 CDP 队列任务标记失败，需选好新模式后重新提交。
-
-## 模型协议
-
-仅支持 OpenAI 兼容 Chat Completions 和 DeepSeek，不再提供 Anthropic Messages 接口或读取 Anthropic 凭据。MCP 接口继续保留，Claude Code 等 MCP 客户端仍可使用浏览器工具，它们不通过本服务调用模型。
-
-旧 Anthropic 配置会要求重新配置模型名称、地址和 Key，旧 Key 不会复用到其他服务。桌面中保存新的模型设置即可；独立服务可显式设置 `MODEL_PROVIDER=openai|deepseek`、`MODEL_NAME`、`MODEL_BASE_URL`、`MODEL_API_KEY` 后重启完成迁移。未开始的旧 Anthropic 队列任务会失败，需重新配置后提交；历史结果仍可查看。

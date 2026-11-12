@@ -1,34 +1,20 @@
 # HTTP API 使用说明
 
-本页描述已实现的 v1 接口（契约版本 1.2.0）。机器可读契约见 [OpenAPI 3.1.1](openapi.json)；[完整设计稿](api-v1-design.md)还包含后续能力，不应作为当前端点清单。
+[返回文档导航](README.md) · [服务部署](service.md)
+
+本页描述已实现的 v1 接口（契约版本 1.2.0）。机器可读契约见 [OpenAPI 3.1.1](openapi.json)。历史提案见 [归档设计](archive/api-v1-design.md)，不属于当前接口契约。
 
 ## 启动
 
 独立部署、Docker 和外部调用示例见 [服务部署](service.md)。在线契约为 `GET /v1/openapi.json`（需 Bearer Token）。
 
-需要 Node.js 22.12+ 和已安装的 Chrome、Edge 或 Playwright Chromium。先在桌面设置里配置模型；无界面启动也可使用现有 MODEL_PROVIDER、MODEL_NAME、MODEL_API_KEY、MODEL_BASE_URL 等环境变量。已保存配置优先于环境变量。
+默认 API 根地址为 `http://127.0.0.1:4319/v1`。推荐使用 `npm run start:service` 读取 `.env` 启动；`npm run api` 使用进程环境变量。模型、鉴权 Token、浏览器和数据目录配置见 [配置参考](configuration.md)。
 
-```bash
-# API Token 与模型 Key、扩展配对令牌分别管理。请保存该值供客户端使用。
-export OBU_API_TOKEN="$(openssl rand -hex 32)"
-export BROWSER_HEADLESS=1
-npm run api
-```
-
-默认 API 地址 `http://127.0.0.1:4319/v1`，扩展中继仍监听 4318。`OBU_API_PORT` 指定 API 端口（0 使用随机空闲端口）；`PORT` 指定无界面后台的中继端口。`OBU_DATA_DIR` 可指定配置及数据库目录。启动日志只显示地址，不输出 Token。
-
-桌面应用默认不开 HTTP。需要同时使用桌面与 API 时：
-
-```bash
-export OBU_API_TOKEN="$(openssl rand -hex 32)"
-OBU_API_ENABLED=1 npm start
-```
-
-不要同时运行两个使用相同数据目录的后台；进程锁会拒绝第二个实例。崩溃留下的锁在确认原 PID 已退出后自动接管。若 PID 已被其他活进程复用，锁会保守拒绝接管。
+Electron 可启用自带后台的 HTTP API，或连接已有服务；两种模式和 Windows 命令见 [服务部署](service.md)。不要同时运行两个共享数据目录的后台。
 
 ## 最小调用
 
-所有请求带 `Authorization: Bearer <token>`。POST 和 DELETE 都必须带 `Idempotency-Key`；POST 还必须带 `Content-Type: application/json`，无参数 POST 发送 `{}`，DELETE 可以不带请求体。同一请求重试使用原 key；不同请求用新 key。同 key 不同 JSON 参数返回 409。
+公开 `/v1` 接口的所有请求带 `Authorization: Bearer <token>`。POST 和 DELETE 都必须带 `Idempotency-Key`；POST 还必须带 `Content-Type: application/json`，无参数 POST 发送 `{}`，DELETE 可以不带请求体。同一请求重试使用原 key；不同请求用新 key。同 key 不同 JSON 参数返回 409。
 
 ```bash
 curl http://127.0.0.1:4319/v1/sessions \
@@ -167,16 +153,15 @@ history_retention_days 默认 0，表示永久保留；非零时自动删除到�
 
 DELETE /sessions/{id} 仅允许已关闭会话；排队或执行中的任务应先取消。删除响应为 204，相同删除请求可安全重试；与已删除资源关联的旧创建/控制请求 key 返回 410 resource_deleted，不会重新创建资源。已打开的历史事件流会结束。幂等墓碑保留，避免旧请求复活已清理数据。
 
-## 当前边界与验证
+## 当前边界
 
 - 服务面向单租户调用，默认绑定 IPv4 loopback，可通过 OBU_API_HOST 设置外部监听地址；部署见 [服务部署](service.md)。除 /healthz 和 /readyz 的最小健康信息外，所有端点鉴权；来自网页的 Origin/Sec-Fetch-Site 请求被拒绝，不支持浏览器 CORS 客户端。Token 至少 32 个非空白字符。
-- HTTP JSON 请求体最大 8 MiB；桌面 IPC 保留原输入能力。
+- HTTP JSON 请求体最大 8 MiB，内部桌面桥接也使用该上限；桌面自带后台的 IPC 不受 HTTP 请求体上限约束。
 - API 不返回模型 Key 或配对令牌，输出及持久化记录经过现有脱敏逻辑；任意自由文本仍无法保证识别所有秘密。
 - 已实现 SSE、HTTP 截图/导出/删除、FIFO 队列和生命周期管理。尚未提供多浏览器并发、Webhook、多用户或 SDK。
-- 使用真实浏览器和模拟模型服务验证 API 正常执行、续聊、人工回复、暂停取消、恢复及幂等；这不等于真实模型业务成功率验证。
-- 已于 2026-11-11 使用真实 DeepSeek 完成公开示例页读取、续聊、历史结果保留和关闭会话的冒烟验证；这不代表所有真实业务流程均已验收。可运行 `node scripts/smoke-api.mjs` 复现（会使用已保存模型凭据并产生少量模型调用）。
-- 完整测试：`npm test`。单独 API 验证：`node --test test/http-api.test.js`。真实模型验收前需在本机配置凭据，选择不会产生外部副作用的测试站点，再核验任务结果；不要把 Key 发到聊天或提交到仓库。
+
+测试范围与运行方法见 [开发与发布](development.md#测试范围)。
 
 ## 浏览器模式变更
 
-可创建的浏览器模式仅为 `ephemeral`、`persistent`、`extension`。直接 CDP 模式已移除，创建会话时传 `browser_mode=cdp` 返回 422。旧配置尚未重新选择模式时，创建会话和提交队列返回 409 `browser_selection_required`；迁移方法见 [服务部署](service.md)。历史会话保留原模式名称用于审计，不代表该模式仍可使用。
+可创建的浏览器模式仅为 `ephemeral`、`persistent`、`extension`。直接 CDP 模式已移除，创建会话时传 `browser_mode=cdp` 返回 422。旧配置尚未重新选择模式时，创建会话和提交队列返回 409 `browser_selection_required`；迁移方法见 [升级与迁移](migration.md)。历史会话保留原模式名称用于审计，不代表该模式仍可使用。

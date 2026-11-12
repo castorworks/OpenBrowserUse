@@ -118,7 +118,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   assert.equal(historyPage.nextOffset, 2);
   await page.evaluate(id => openReplay(id), savedTaskId);
   await page.locator('#replay-recover').click();
-  await until(async () => { const s = await api('state'); return requests.some(r => JSON.stringify(r.messages).includes('恢复检查点')) && s.task?.id === savedTaskId && !s.busy && s.task.status === 'done'; });
+  await until(async () => { const s = await api('state'); return requests.some(r => JSON.stringify(r.messages).includes('恢复检查点')) && s.task?.id !== savedTaskId && !s.busy && s.task.status === 'done'; });
   assert.ok(requests.some(r => JSON.stringify(r.messages).includes('恢复检查点')));
   assert.ok(requests.some(r => JSON.stringify(r.messages).includes('继续确认')));
   await page.waitForFunction(() => document.getElementById('replay-banner').hidden);
@@ -149,7 +149,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'renderer fits a narrow window');
   await page.setViewportSize({ width: 1440, height: 1000 });
   const sessions = (await api('sessions')).sessions;
-  assert.equal(sessions.length, 1);
+  assert.equal(sessions.length, 2);
   await page.locator('#history-search').fill('不存在的会话');
   assert.match(await page.locator('#history-list').textContent(), /没有/);
   await page.locator('#history-search').fill('');
@@ -227,7 +227,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   const restored = await restoredPage.evaluate(() => window.desktop.request('state'));
   assert.equal(restored.config.model, 'desktop-test'); assert.equal(restored.config.hasKey, true);
   assert.equal(restored.config.browser.mode, 'extension');
-  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 2);
+  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 3);
   const row = restoredPage.locator(`.history-row[data-id="${sessions[0].id}"]`);
   await row.locator('.history-item').click();
   assert.equal(await restoredPage.locator('#replay-banner').isVisible(), true);
@@ -235,10 +235,61 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await row.hover();
   await row.locator('.history-delete').click();
   assert.equal(await row.locator('.history-delete').textContent(), '确认删除');
-  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 2);
+  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 3);
   await row.locator('.history-delete').click();
   await row.waitFor({ state: 'detached' });
-  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 1);
+  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 2);
 
   await desktop.close(); desktop = null;
+});
+
+test('Electron attaches to an existing service and leaves its task running on exit', { timeout: 60000 }, async t => {
+  const { startRuntime } = await import('../lib/runtime.js');
+  const dir = await mkdtemp(join(tmpdir(), 'obu-desktop-attached-'));
+  const token = 'desktop-attached-service-test-token-123456789';
+  let runtime, desktop;
+  const mock = createServer(async (req, res) => {
+    for await (const _ of req) { /* consume input */ }
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ message: { tool_calls: [{ id: 'ask', type: 'function', function: { name: 'ask_user', arguments: '{"question":"保持任务运行？"}' } }] }, finish_reason: 'tool_calls' }] }));
+  });
+  await new Promise(r => mock.listen(0, '127.0.0.1', r));
+  t.after(async () => {
+    await desktop?.close().catch(() => {}); await runtime?.close();
+    mock.closeAllConnections(); await new Promise(r => mock.close(r)); await rm(dir, { recursive: true, force: true });
+  });
+  runtime = await startRuntime({ port: 0, dataDir: join(dir, 'data'), browserOptions: { headless: true }, env: {
+    OBU_API_ENABLED: '1', OBU_API_PORT: '0', OBU_API_TOKEN: token, MODEL_PROVIDER: 'openai', MODEL_NAME: 'attached-fixture', MODEL_API_KEY: 'fixture', MODEL_BASE_URL: `http://127.0.0.1:${mock.address().port}/v1`,
+  } });
+  const origin = `http://127.0.0.1:${runtime.httpPort}`;
+  const env = { ...process.env, OBU_SERVICE_URL: origin, OBU_API_TOKEN: token, OBU_DATA_DIR: join(dir, 'data'), OBU_DESKTOP_USER_DATA: join(dir, 'electron'), OBU_DESKTOP_TEST: '1' };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const launch = () => electron.launch({ ...(process.env.OBU_ELECTRON_EXECUTABLE ? { executablePath: process.env.OBU_ELECTRON_EXECUTABLE, args: [] } : { args: [resolve('.')] }), env, timeout: 30000 });
+  desktop = await launch();
+  let page = await desktop.firstWindow();
+  await page.waitForFunction(() => document.querySelector('#connection')?.textContent === '已连接独立服务');
+  await page.evaluate(() => window.desktop.request('tasks', { goal: 'wait for the user', permissionMode: 'skip' }));
+  await until(() => runtime.agent.task?.status === 'waiting_user');
+  await page.waitForFunction(() => !document.querySelector('#decision').hidden);
+  const runId = runtime.agent.task.runs.at(-1).id;
+  await desktop.close(); desktop = null;
+  assert.equal(runtime.agent.busy, true);
+  assert.equal(runtime.api.tasks.get('run', runId).status, 'waiting_input');
+  const status = await fetch(origin + '/v1/status', { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(status.status, 200);
+  desktop = await launch(); page = await desktop.firstWindow();
+  await page.waitForFunction(() => document.querySelector('#connection')?.textContent === '已连接独立服务');
+  await page.waitForFunction(() => !document.querySelector('#decision').hidden);
+  const state = await page.evaluate(() => window.desktop.request('state'));
+  assert.equal(state.task.runs.at(-1).id, runId);
+  assert.ok(!JSON.stringify(state).includes(token));
+  await page.evaluate(() => window.desktop.request('control', { command: 'stop' }));
+  await until(() => !runtime.agent.busy);
+  assert.equal(runtime.api.tasks.get('run', runId).status, 'cancelled');
+  const servicePort = runtime.httpPort;
+  await runtime.close();
+  await page.waitForFunction(() => document.querySelector('#connection')?.textContent === '服务连接中断');
+  runtime = await startRuntime({ port: 0, dataDir: join(dir, 'data'), env: { OBU_API_ENABLED: '1', OBU_API_PORT: String(servicePort), OBU_API_TOKEN: token } });
+  await page.waitForFunction(() => document.querySelector('#connection')?.textContent === '已连接独立服务');
+  assert.equal(runtime.api.tasks.get('run', runId).status, 'cancelled');
 });

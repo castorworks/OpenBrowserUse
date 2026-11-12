@@ -220,7 +220,8 @@ function render(state) {
   positionPointer();
   $('model-badge').textContent = state.config.model || '待配置';
   $('browser-badge').textContent = browserModes[state.config.browser.mode];
-  $('connection').textContent = '本地服务已连接'; $('connection-dot').classList.remove('offline');
+  $('connection').textContent = state.service?.ownership === 'external' ? '已连接独立服务' : '本地服务已连接';
+  $('connection').title = state.service?.ownership === 'external' ? `${state.service.url} · 退出桌面不会停止服务或任务` : '退出应用会停止随桌面启动的后台'; $('connection-dot').classList.remove('offline');
   if (!configured) { showConfig(state.config); configured = true; }
   const t = state.task, busy = state.busy;
   $('demo').disabled = busy || Boolean(t?.sessionOpen) || Boolean(state.queue?.queued_count);

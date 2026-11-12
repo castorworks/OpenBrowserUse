@@ -63,6 +63,10 @@ test('HTTP accepts once, preserves rounds, shares desktop lock, and keeps secret
   const rid = started.body.id;
   const done = await until(async () => { const r = await call('GET', `/runs/${rid}`); return r.body.status === 'completed' && r.body; });
   assert.equal(done.result.outcome, 'unverified');
+  const lastEvent = runtime.api.tasks.events.last(rid);
+  runtime.api.tasks.put('run', { ...done, status: 'running', finished_at: null, result: null });
+  assert.deepEqual(runtime.api.tasks.get('run', rid), done, 'a terminal round cannot regress');
+  assert.equal(runtime.api.tasks.events.last(rid), lastEvent, 'ignored stale updates produce no events');
   const count = f.calls();
   assert.deepEqual((await call('POST', `/sessions/${sid}/runs`, { goal: 'summarize' }, 'run-1')).body, started.body);
   assert.equal(f.calls(), count);
@@ -84,7 +88,7 @@ test('HTTP interactions require the exact pending ID and reject stale replies', 
   await until(async () => (await call('GET', `/runs/${r.id}`)).body.status === 'waiting_input');
   const i = (await call('GET', `/runs/${r.id}/interactions?status=pending`)).body.data[0];
   assert.equal((await call('POST', `/runs/${r.id}/resume`, {})).status, 409);
-  assert.equal((await runtime.api.request('POST', '/api/control', { command: 'resume', answer: 'missing id' })).status, 400);
+  assert.equal((await runtime.api.request('POST', '/api/control', { command: 'resume', answer: 'missing id' })).status, 409);
   assert.equal((await call('POST', `/runs/${r.id}/interactions/${i.id}/response`, { answer: 'yes' }, 'answer-1')).status, 200);
   assert.equal((await call('POST', `/runs/${r.id}/interactions/${i.id}/response`, { answer: 'yes' }, 'answer-1')).status, 200);
   assert.equal((await call('POST', `/runs/${r.id}/interactions/${i.id}/response`, { answer: 'late' })).status, 409);
@@ -95,7 +99,7 @@ test('interrupted acceptances survive restart and are not executed again', async
   const { runtime, call, env, dir, calls } = await fixture(t);
   const s = (await call('POST', '/sessions', {}, 'persist-session')).body;
   // Simulate a process dying after durable acceptance but before dispatch.
-  const store = runtime.api.httpApi, rid = crypto.randomUUID();
+  const store = runtime.api.tasks, rid = crypto.randomUUID();
   store.put('run', { id: rid, session_id: s.id, status: 'starting', created_at: new Date().toISOString() });
   store.put('session', { ...s, active_run_id: rid });
   await runtime.close();
@@ -103,9 +107,9 @@ test('interrupted acceptances survive restart and are not executed again', async
   t.after(() => restarted.close());
   const result = await fetch(`http://127.0.0.1:${restarted.httpPort}/v1/runs/${rid}`, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal((await result.json()).status, 'interrupted'); assert.equal(calls(), 0);
-  assert.equal(restarted.api.httpApi.get('session', s.id).status, 'closed');
+  assert.equal(restarted.api.tasks.get('session', s.id).status, 'closed');
   const replay = await fetch(`http://127.0.0.1:${restarted.httpPort}/v1/sessions`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': 'persist-session' }, body: '{}' });
-  assert.equal((await replay.json()).id, s.id); assert.equal(restarted.api.httpApi.openSession(), undefined);
+  assert.equal((await replay.json()).id, s.id); assert.equal(restarted.api.tasks.openSession(), undefined);
   await restarted.close();
 });
 
@@ -151,7 +155,7 @@ test('recovery creates a new round and session, preserves old result and memory'
 test('a second backend cannot acquire the same data directory', async t => {
   const { runtime, dir, env } = await fixture(t);
   await assert.rejects(startRuntime({ port: 0, dataDir: dir, env }), /数据目录已由后台进程/);
-  assert.equal(runtime.api.httpApi.openSession(), undefined);
+  assert.equal(runtime.api.tasks.openSession(), undefined);
 });
 
 
@@ -186,9 +190,9 @@ test('SIGKILL recovery preserves the run acceptance without repeating model call
   const before = calls();
   const restarted = await startRuntime({ port: 0, env, dataDir: dir });
   t.after(() => restarted.close());
-  const run = restarted.api.httpApi.get('run', accepted.id);
+  const run = restarted.api.tasks.get('run', accepted.id);
   assert.equal(run.status, 'interrupted');
-  assert.equal(restarted.api.httpApi.all('interaction').find(i => i.run_id === run.id).status, 'expired');
+  assert.equal(restarted.api.tasks.all('interaction').find(i => i.run_id === run.id).status, 'expired');
   const retried = await fetch(`http://127.0.0.1:${restarted.httpPort}/v1/sessions/${s.id}/runs`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': 'crash-run' }, body: JSON.stringify({ goal: 'wait for an answer' }) });
   assert.equal(retried.status, 202); assert.deepEqual(await retried.json(), accepted);
   assert.equal(calls(), before); assert.equal(restarted.agent.task, null);
@@ -234,7 +238,7 @@ test('FIFO jobs wait for interactive sessions, run serially and close their brow
   assert.equal(one.status, 'queued'); assert.ok(one.queue_sequence < two.queue_sequence);
   assert.deepEqual((await call('POST', '/jobs', { goal: 'first' }, 'job-1')).body, one);
   assert.equal((await call('GET', `/runs/${one.run_id}`)).body.status, 'queued');
-  const payload = runtime.api.httpApi.db.prepare('SELECT payload FROM api_queue WHERE job_id=?').get(one.id).payload;
+  const payload = runtime.api.tasks.db.prepare('SELECT payload FROM api_queue WHERE job_id=?').get(one.id).payload;
   assert.ok(!payload.includes('private-model-key'));
   const cancelled = (await call('POST', '/jobs', { goal: 'never run' })).body;
   assert.equal((await call('POST', `/jobs/${cancelled.id}/cancel`, {})).body.status, 'cancelled');
@@ -257,8 +261,8 @@ test('idle cleanup and retention preserve pending work; deletion tombstones rela
   assert.equal((await call('POST', '/jobs', { goal: 'overflow' })).status, 409);
   assert.equal((await call('DELETE', `/sessions/${queued.session_id}`)).status, 409);
   // Stop automatic dispatch so this exercises lifecycle decisions deterministically.
-  runtime.api.httpApi.lifecycle.stop();
-  await runtime.api.httpApi.serialize(() => runtime.api.httpApi.lifecycle.tick(Date.now() + 2000));
+  runtime.api.tasks.lifecycle.stop();
+  await runtime.api.tasks.serialize(() => runtime.api.tasks.lifecycle.tick(Date.now() + 2000));
   assert.equal((await call('GET', `/sessions/${s.id}`)).body.status, 'closed');
   assert.equal((await call('GET', `/jobs/${queued.id}`)).body.status, 'queued');
   assert.equal((await call('DELETE', `/sessions/${s.id}`, undefined, 'delete-1')).status, 204);
@@ -267,7 +271,7 @@ test('idle cleanup and retention preserve pending work; deletion tombstones rela
   assert.equal((await call('GET', `/sessions/${s.id}`)).status, 404);
   await call('POST', `/jobs/${queued.id}/cancel`, {});
   await call('POST', '/settings/lifecycle', { history_retention_days: 1, idle_timeout_seconds: 0, max_queued_jobs: 2 });
-  await runtime.api.httpApi.serialize(() => runtime.api.httpApi.lifecycle.tick(Date.now() + 2 * 86400000));
+  await runtime.api.tasks.serialize(() => runtime.api.tasks.lifecycle.tick(Date.now() + 2 * 86400000));
   assert.equal((await call('GET', `/jobs/${queued.id}`)).status, 404);
   assert.equal((await call('GET', `/runs/${queued.run_id}/events`)).status, 404);
 });
@@ -279,8 +283,8 @@ test('queued jobs survive restart and retain FIFO order without resuming active 
   await runtime.close();
   const restarted = await startRuntime({ port: 0, env, dataDir: dir, browserOptions: { headless: true } });
   t.after(() => restarted.close());
-  await until(() => restarted.api.httpApi.get('job', job.id).status === 'completed');
-  assert.equal(restarted.api.httpApi.get('run', job.run_id).status, 'completed');
+  await until(() => restarted.api.tasks.get('job', job.id).status === 'completed');
+  assert.equal(restarted.api.tasks.get('run', job.run_id).status, 'completed');
   await restarted.close();
 });
 
@@ -289,7 +293,7 @@ test('a waiting queued job owns the slot until cancelled; idle cleanup never ski
   const first = (await call('POST', '/jobs', { goal: 'ask before continuing' })).body;
   const next = (await call('POST', '/jobs', { goal: 'later' })).body;
   await until(async () => (await call('GET', `/runs/${first.run_id}`)).body.status === 'waiting_input');
-  await runtime.api.httpApi.serialize(() => runtime.api.httpApi.lifecycle.tick(Date.now() + 86400000));
+  await runtime.api.tasks.serialize(() => runtime.api.tasks.lifecycle.tick(Date.now() + 86400000));
   assert.equal((await call('GET', `/jobs/${next.id}`)).body.status, 'queued');
   assert.equal((await call('GET', `/sessions/${first.session_id}`)).body.status, 'open');
   await call('POST', `/jobs/${first.id}/cancel`, {});
@@ -303,7 +307,7 @@ test('legacy queued direct connections fail without launching a replacement brow
   const { runtime, call, calls } = await fixture(t);
   const session = await call('POST', '/sessions', {});
   const job = await call('POST', '/jobs', { goal: 'legacy task' });
-  const api = runtime.api.httpApi;
+  const api = runtime.api.tasks;
   const row = api.db.prepare('SELECT payload FROM api_queue WHERE job_id=?').get(job.body.id);
   const payload = api.lifecycle.payload.open(row.payload);
   payload.config.browser.mode = 'cdp';
@@ -322,7 +326,7 @@ test('legacy queued model providers fail without calling another service', async
   const { runtime, call, calls } = await fixture(t);
   const session = await call('POST', '/sessions', {});
   const job = await call('POST', '/jobs', { goal: 'legacy task' });
-  const api = runtime.api.httpApi;
+  const api = runtime.api.tasks;
   const row = api.db.prepare('SELECT payload FROM api_queue WHERE job_id=?').get(job.body.id);
   const payload = api.lifecycle.payload.open(row.payload);
   payload.config.provider = 'anthropic';

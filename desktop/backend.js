@@ -1,3 +1,4 @@
+import { ServiceClient } from '../lib/service-client.js';
 import { startRuntime } from '../lib/runtime.js';
 
 const parent = process.parentPort;
@@ -24,18 +25,23 @@ parent.on('message', async ({ data }) => {
   } catch (error) { send({ type: 'response', id: data.id, status: 500, body: { error: error.message } }); }
 });
 try {
-  runtime = await startRuntime({
-    port: Number(process.env.OBU_DESKTOP_PORT ?? process.env.PORT ?? 4318), fallbackPort: true,
-    browserOptions: { headless: process.env.BROWSER_HEADLESS === '1' },
-  });
+  if (process.env.OBU_SERVICE_URL) {
+    const client = await ServiceClient.connect({ url: process.env.OBU_SERVICE_URL, token: process.env.OBU_API_TOKEN });
+    runtime = { api: client, origin: client.origin, close: () => client.close() };
+  } else {
+    runtime = await startRuntime({
+      port: Number(process.env.OBU_DESKTOP_PORT ?? process.env.PORT ?? 4318), fallbackPort: true,
+      browserOptions: { headless: process.env.BROWSER_HEADLESS === '1' },
+    });
+  }
   unsubscribe = runtime.api.subscribe((event, data) => {
-    if (event === 'state' || event === 'pointer') send({ type: 'event', event, data });
+    if (event === 'desktop-focus') send({ type: 'desktop-focus' });
+    else if (event === 'state' || event === 'pointer' || event === 'offline') send({ type: 'event', event, data });
     else {
       frame = data;
       frameTimer ||= setTimeout(() => { frameTimer = null; send({ type: 'event', event: 'frame', data: frame }); }, 120);
     }
   });
-  runtime.relay.on('desktop-focus', () => send({ type: 'desktop-focus' }));
   send({ type: 'ready', origin: runtime.origin });
 } catch (error) {
   send({ type: 'fatal', error: error.message });

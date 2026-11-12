@@ -164,3 +164,46 @@ test('manual resume preserves long answers', async t => {
   a.control('resume', answer, a.task.pending.id);
   assert.equal(resumed.answer, answer);
 });
+
+test('startup preflight failure preserves the current task and never reserves the slot', async t => {
+  const a = await fixture(t), before = a.task, browser = a.browser;
+  const config = { provider: 'openai', baseURL: 'https://example.com/v1', model: 'fixture', browser: { requiresSelection: true } };
+  await assert.rejects(a.start({ goal: 'new task' }, config), /重新|选择/);
+  assert.equal(a.busy, false);
+  assert.equal(a.task, before);
+  assert.equal(a.browser, browser);
+  await assert.rejects(a.recover(before.id, config), /重新|选择/);
+  assert.equal(a.busy, false);
+  assert.equal(a.task, before);
+});
+
+test('browser close failure releases startup slot and retains the browser for retry', async t => {
+  const a = await fixture(t), before = a.task;
+  let failClose = true;
+  const browser = { close: async () => { if (failClose) throw new Error('close failed'); } };
+  a.browser = browser;
+  await assert.rejects(a.start({ goal: 'new task', demo: true }, { browser: {} }), /close failed/);
+  assert.equal(a.busy, false);
+  assert.equal(a.task, before);
+  assert.equal(a.browser, browser);
+  failClose = false;
+  await a.closeBrowser();
+  assert.equal(a.browser, null);
+});
+
+test('failure after task allocation finalizes the failed round and permits a later start', async t => {
+  const a = await fixture(t);
+  a.browser = { close: async () => {} };
+  a.attachContext = () => { throw new Error('context init failed'); };
+  await assert.rejects(a.start({ goal: 'new task', demo: true }, { browser: {} }), /context init failed/);
+  assert.equal(a.busy, false);
+  assert.equal(a.task.status, 'failed');
+  assert.equal(a.task.runs.at(-1).status, 'failed');
+  assert.ok(a.task.runs.at(-1).finished_at);
+  a.attachContext = () => {};
+  a.boot = async () => { a.task.status = 'done'; await a.finish(); };
+  await a.start({ goal: 'retry', demo: true }, { browser: {} });
+  await a.promise;
+  assert.equal(a.busy, false);
+  assert.equal(a.task.runs.at(-1).status, 'completed');
+});
