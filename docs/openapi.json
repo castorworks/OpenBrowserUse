@@ -2550,8 +2550,14 @@
           "close_reason": {
             "type": "string",
             "enum": [
-              "idle_timeout"
+              "idle_timeout",
+              "run_finished"
             ]
+          },
+          "keep_alive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Keep the browser session open after a terminal run for follow-ups. Default false closes the session and releases the queue slot. Queued jobs always close; retained sessions remain subject to the idle timeout."
           }
         },
         "required": [
@@ -3004,6 +3010,11 @@
               "skip"
             ],
             "default": "skip"
+          },
+          "keep_alive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Keep the browser session open after a terminal run for follow-ups. Default false closes the session and releases the queue slot. Queued jobs always close; retained sessions remain subject to the idle timeout."
           }
         },
         "required": [],
@@ -3049,6 +3060,11 @@
               "auto",
               "skip"
             ]
+          },
+          "keep_alive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Keep the browser session open after a terminal run for follow-ups. Default false closes the session and releases the queue slot. Queued jobs always close; retained sessions remain subject to the idle timeout."
           }
         },
         "required": [],

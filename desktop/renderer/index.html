@@ -76,7 +76,9 @@
       <textarea id="goal" rows="2" placeholder="描述目标，例如：打开 https://playwright.dev，找到浏览器支持列表，并用中文整理结果。"></textarea>
       <div class="composer-options">
         <label class="field-inline" title="权限模式"><span class="sr-only">权限</span><select id="permission-mode"><option value="ask">逐步确认</option><option value="auto">自动 · 审查风险</option><option value="skip" selected>直接执行</option></select></label>
+        <label class="field-inline"><input id="keep-alive" type="checkbox">任务结束后保留会话（可继续追问）</label>
         </div>
+      <p class="hint">默认结束后自动关闭会话并继续队列；队列任务始终自动关闭。</p>
       <p class="inline-error" id="composer-error" role="alert" hidden></p>
       <div class="composer-row composer-submit"><span class="keyboard-hint" id="submit-hint">Enter 开始 · Shift + Enter 换行</span>
       <div class="submit-actions">
@@ -181,7 +183,7 @@
     <button class="btn btn-primary btn-block" id="save-blocked">保存受保护网站</button>
   </section>
   <section class="drawer-panel" id="lifecycle-panel" role="tabpanel" hidden>
-    <div class="field"><label for="idle-timeout">闲置浏览器自动关闭（秒）</label><input id="idle-timeout" type="number" min="0" max="86400" value="900"><p class="hint">0 表示不自动关闭。执行中、暂停和等待确认不计为闲置。</p></div>
+    <div class="field"><label for="idle-timeout">闲置浏览器自动关闭（秒）</label><input id="idle-timeout" type="number" min="0" max="86400" value="900"><p class="hint">用于保留的会话及尚未开始的会话；0 表示不按闲置时间关闭。执行中、暂停和等待确认不计为闲置。</p></div>
     <div class="field"><label for="history-retention">历史保留天数</label><input id="history-retention" type="number" min="0" max="3650" value="0"><p class="hint">0 表示永久保留。设置天数后，过期的已关闭会话及其记录将自动删除。</p></div>
     <div class="field"><label for="queue-capacity">最多等待任务数</label><input id="queue-capacity" type="number" min="1" max="1000" value="100"></div>
     <button class="btn btn-primary btn-block" id="save-lifecycle">保存会话与队列设置</button>

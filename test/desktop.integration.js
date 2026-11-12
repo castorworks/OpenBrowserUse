@@ -104,7 +104,11 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#drawer').isVisible(), false);
   await api('config', { provider: 'openai', baseURL: `http://127.0.0.1:${mock.address().port}`, model: 'desktop-test', apiKey: 'desktop-fixture-key', vision: false });
-  await api('tasks', { goal: '测试桌面工作台', startURL: siteURL });
+  await page.locator('#new-task').click();
+  assert.equal(await page.locator('#keep-alive').isChecked(), false);
+  await page.locator('#keep-alive').check();
+  await page.locator('#goal').fill(`测试桌面工作台 ${siteURL}`);
+  await page.locator('#run').click();
   await until(async () => { const s = await api('state'); return s.task?.mode === 'ai' && s.task.status === 'done' && !s.busy; });
   assert.match((await api('state')).task.result, /桌面模型测试完成/);
   await api('messages', { text: '继续确认' });
@@ -194,6 +198,16 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await api('control', { command: 'stop' });
   await until(async () => !(await api('state')).task.sessionOpen);
 
+  await page.locator('#new-task').click();
+  await page.locator('#keep-alive').uncheck();
+  await page.locator('#goal').fill('自动关闭会话测试');
+  await page.locator('#run').click();
+  await until(async () => { const s = await api('state'); return s.task?.goal === '自动关闭会话测试' && s.task.status === 'done' && !s.busy && !s.task.sessionOpen; });
+  await page.locator('#new-task').click();
+  await page.locator('#goal').fill('下一个任务');
+  await page.waitForFunction(() => !document.querySelector('#run').disabled);
+  assert.equal(await page.locator('#task-context').isVisible(), false);
+
   const executablePath = extensionChromium();
   assert.ok(executablePath, 'Install Playwright Chromium or set OBU_TEST_CHROMIUM for the extension integration test');
   const extensionPath = await testExtension(dir, origin, process.env.OBU_ELECTRON_EXECUTABLE ? resolve(process.env.OBU_ELECTRON_EXECUTABLE, '../../Resources/extension') : resolve('extension'));
@@ -209,7 +223,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await until(() => desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()));
   await panel.close();
   await api('browser', { mode: 'extension', blockedSites: [] });
-  await api('tasks', { goal: '验证桌面应用连接真实 Chrome 扩展', startURL: siteURL });
+  await api('tasks', { goal: '验证桌面应用连接真实 Chrome 扩展', startURL: siteURL, keepAlive: true });
   await until(async () => { const s = await api('state'); return s.task.status === 'done' && !s.busy; });
   assert.match((await api('state')).task.result, /桌面模型测试完成/);
   assert.ok(await worker.evaluate(() => obu.agentTabs.size > 0));
@@ -223,7 +237,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   const restored = await restoredPage.evaluate(() => window.desktop.request('state'));
   assert.equal(restored.config.model, 'desktop-test'); assert.equal(restored.config.hasKey, true);
   assert.equal(restored.config.browser.mode, 'extension');
-  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 3);
+  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 4);
   const row = restoredPage.locator(`.history-row[data-id="${sessions[0].id}"]`);
   await row.locator('.history-item').click();
   assert.equal(await restoredPage.locator('#replay-banner').isVisible(), true);
@@ -231,10 +245,10 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await row.hover();
   await row.locator('.history-delete').click();
   assert.equal(await row.locator('.history-delete').textContent(), '确认删除');
-  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 3);
+  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 4);
   await row.locator('.history-delete').click();
   await row.waitFor({ state: 'detached' });
-  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 2);
+  assert.equal((await restoredPage.evaluate(() => window.desktop.request('sessions'))).sessions.length, 3);
 
   await desktop.close(); desktop = null;
 });

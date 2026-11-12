@@ -450,7 +450,7 @@ async function start(demo) {
   if (!demo && !current?.config.model) { openDrawer('settings'); $('model').focus(); throw new Error('先填写模型设置并保存，再开始 AI 任务。'); }
   const goal = demo ? '在演示商店搜索键盘，并读取搜索结果。' : $('goal').value.trim();
   if (!goal) { $('goal').focus(); throw new Error('请先描述任务目标。'); }
-  await api('tasks', { goal, permissionMode: $('permission-mode').value, demo });
+  await api('tasks', { goal, permissionMode: $('permission-mode').value, keepAlive: $('keep-alive').checked, demo });
   composeNew = false; if (replay) exitReplay();
   if (!demo) $('goal').value = '';
 }

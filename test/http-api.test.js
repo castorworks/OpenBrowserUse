@@ -15,10 +15,11 @@ async function until(check) {
 }
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'obu-http-'));
-  let calls = 0, question = false, slow = false;
+  let calls = 0, question = false, slow = false, failNext = false;
   const model = createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c);
     const body = JSON.parse(Buffer.concat(chunks)); calls++;
+    if (failNext) { failNext = false; res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'fixture failure' } })); return; }
     if (slow) await new Promise(r => setTimeout(r, 200));
     const answered = body.messages.some(m => m.role === 'tool' && String(m.content).includes('用户回复'));
     const message = question && !answered ? { tool_calls: [{ id: 'ask-1', type: 'function', function: { name: 'ask_user', arguments: '{"question":"继续吗？"}' } }] } : { content: `answer-${calls}` };
@@ -34,7 +35,7 @@ async function fixture(t) {
     return { status: r.status, body: payload, headers: r.headers };
   };
   t.after(async () => { await runtime.close(); model.closeAllConnections(); await new Promise(r => model.close(r)); await rm(dir, { recursive: true, force: true }); });
-  return { runtime, call, dir, env, calls: () => calls, question: () => { question = true; }, slow: () => { slow = true; } };
+  return { runtime, call, dir, env, calls: () => calls, failNext: () => { failNext = true; }, question: () => { question = true; }, slow: () => { slow = true; } };
 }
 
 test('HTTP accepts once, preserves rounds, shares desktop lock, and keeps secrets private', async t => {
@@ -52,7 +53,7 @@ test('HTTP accepts once, preserves rounds, shares desktop lock, and keeps secret
   assert.equal((await call('GET', '/status', undefined, undefined, 'wrong')).status, 401);
   assert.equal((await fetch(runtime.origin + '/v1/status')).status, 404);
   assert.equal((await call('POST', '/sessions', { browser_mode: 'cdp' })).status, 422);
-  const [one, two] = await Promise.all([call('POST', '/sessions', {}, 'session-1'), call('POST', '/sessions', {}, 'session-1')]);
+  const [one, two] = await Promise.all([call('POST', '/sessions', { keep_alive: true }, 'session-1'), call('POST', '/sessions', { keep_alive: true }, 'session-1')]);
   assert.equal(one.status, 201); assert.deepEqual(two.body, one.body);
   const sid = one.body.id;
   assert.equal((await call('POST', '/sessions', { permission_mode: 'ask' }, 'session-1')).status, 409);
@@ -81,11 +82,81 @@ test('HTTP accepts once, preserves rounds, shares desktop lock, and keeps secret
   assert.equal((await call('POST', `/sessions/${sid}/runs`, { goal: 'closed' })).status, 409);
 });
 
+test('default desktop task closes and drains queued jobs without an idle timeout', async t => {
+  const { call, runtime, slow } = await fixture(t); slow();
+  await call('POST', '/settings/lifecycle', { history_retention_days: 0, idle_timeout_seconds: 0, max_queued_jobs: 10 });
+  assert.equal((await runtime.api.request('POST', '/api/tasks', { goal: 'default desktop task' })).status, 202);
+  const sid = runtime.agent.task.id, rid = runtime.agent.task.runs.at(-1).id;
+  assert.equal((await call('GET', `/sessions/${sid}`)).body.keep_alive, false);
+  const one = (await call('POST', '/jobs', { goal: 'next' })).body;
+  const two = (await call('POST', '/jobs', { goal: 'last' })).body;
+  await until(async () => (await call('GET', `/jobs/${two.id}`)).body.status === 'completed');
+  assert.equal((await call('GET', `/jobs/${one.id}`)).body.status, 'completed');
+  const session = (await call('GET', `/sessions/${sid}`)).body;
+  assert.equal(session.status, 'closed'); assert.equal(session.close_reason, 'run_finished');
+  assert.equal((await call('GET', `/runs/${rid}`)).body.status, 'completed');
+  assert.match((await call('GET', `/sessions/${sid}/export`)).body.runs[0].result.text, /answer/);
+  assert.equal(runtime.agent.browser, null);
+  assert.equal((await call('GET', '/status')).body.active_session_id, null);
+  assert.equal(runtime.api.tasks.state().status, 'done', 'closing does not turn success into cancellation');
+});
+
+test('HTTP sessions auto-close by default and retry failed cleanup before releasing the slot', async t => {
+  const { call, runtime } = await fixture(t);
+  const tasks = runtime.api.tasks;
+  tasks.lifecycle.stop(); // Drive cleanup explicitly to test a transient browser close failure.
+  const s = (await call('POST', '/sessions', {})).body;
+  assert.equal(s.keep_alive, false);
+  const r = (await call('POST', `/sessions/${s.id}/runs`, { goal: 'finish' })).body;
+  await until(() => !runtime.agent.busy);
+  const browser = runtime.agent.browser;
+  const close = browser.close.bind(browser);
+  browser.close = async () => { throw new Error('transient close error'); };
+  await tasks.serialize(() => tasks.lifecycle.tick());
+  assert.equal(tasks.get('session', s.id).status, 'open');
+  assert.equal(runtime.agent.browser, browser);
+  assert.equal((await call('POST', '/sessions', {})).status, 409);
+  browser.close = close;
+  await tasks.serialize(() => tasks.lifecycle.tick());
+  assert.equal(tasks.get('session', s.id).status, 'closed');
+  assert.equal(runtime.agent.browser, null);
+  assert.equal(tasks.get('run', r.id).status, 'completed');
+  assert.equal((await call('POST', '/sessions', {})).status, 201);
+});
+
+test('a failed default run releases its session and queued work continues', async t => {
+  const { call, runtime, failNext } = await fixture(t); failNext();
+  const s = (await call('POST', '/sessions', {})).body;
+  const r = (await call('POST', `/sessions/${s.id}/runs`, { goal: 'will fail' })).body;
+  const job = (await call('POST', '/jobs', { goal: 'continue after failure' })).body;
+  await until(async () => (await call('GET', `/jobs/${job.id}`)).body.status === 'completed');
+  assert.equal((await call('GET', `/runs/${r.id}`)).body.status, 'failed');
+  assert.equal((await call('GET', `/sessions/${s.id}`)).body.status, 'closed');
+  assert.equal(runtime.agent.browser, null);
+});
+
+test('retained sessions keep follow-ups available and hold queued work until closed', async t => {
+  const { call, runtime } = await fixture(t);
+  const s = (await call('POST', '/sessions', { keep_alive: true })).body;
+  const r = (await call('POST', `/sessions/${s.id}/runs`, { goal: 'keep this page' })).body;
+  await until(() => !runtime.agent.busy);
+  const job = (await call('POST', '/jobs', { goal: 'later' })).body;
+  await runtime.api.tasks.serialize(() => runtime.api.tasks.lifecycle.tick());
+  assert.equal((await call('GET', `/sessions/${s.id}`)).body.status, 'open');
+  assert.equal((await call('GET', `/jobs/${job.id}`)).body.status, 'queued');
+  assert.ok(runtime.agent.browser);
+  await call('POST', `/sessions/${s.id}/close`, {});
+  await until(async () => (await call('GET', `/jobs/${job.id}`)).body.status === 'completed');
+  assert.equal((await call('GET', `/runs/${r.id}`)).body.status, 'completed');
+});
+
 test('HTTP interactions require the exact pending ID and reject stale replies', async t => {
   const { call, runtime, question } = await fixture(t); question();
   const s = (await call('POST', '/sessions', {})).body;
   const r = (await call('POST', `/sessions/${s.id}/runs`, { goal: 'ask a question' })).body;
   await until(async () => (await call('GET', `/runs/${r.id}`)).body.status === 'waiting_input');
+  await runtime.api.tasks.serialize(() => runtime.api.tasks.lifecycle.tick(Date.now() + 86400000));
+  assert.equal((await call('GET', `/sessions/${s.id}`)).body.status, 'open');
   const i = (await call('GET', `/runs/${r.id}/interactions?status=pending`)).body.data[0];
   assert.equal((await call('POST', `/runs/${r.id}/resume`, {})).status, 409);
   assert.equal((await runtime.api.request('POST', '/api/control', { command: 'resume', answer: 'missing id' })).status, 409);
@@ -204,7 +275,7 @@ const raw = (runtime, path, options = {}) => fetch(`http://127.0.0.1:${runtime.h
 
 test('SSE replays then tails with a reconnect cursor; screenshots and full export are available', async t => {
   const { call, runtime, slow } = await fixture(t); slow();
-  const s = (await call('POST', '/sessions', {})).body;
+  const s = (await call('POST', '/sessions', { keep_alive: true })).body;
   const r = (await call('POST', `/sessions/${s.id}/runs`, { goal: 'stream test' })).body;
   const stream = await raw(runtime, `/runs/${r.id}/events/stream`);
   assert.equal(stream.headers.get('content-type'), 'text/event-stream; charset=utf-8');

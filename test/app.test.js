@@ -30,7 +30,7 @@ async function until(check, timeout = 25000) { const start = Date.now(); while (
 const post = (path, body) => api.request('POST', '/api/' + path, ['control', 'messages'].includes(path) ? { interactionId: agent.task?.pending?.id, ...body } : body);
 const get = path => api.request('GET', '/api/' + path);
 async function configureOpenAI() { return post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/v1`, model: 'test-model', apiKey: 'test-secret', vision: false }); }
-async function start(extra = {}) { return post('tasks', { goal: '搜索键盘并读取价格', startURL: origin + '/demo', maxSteps: 20, permissionMode: 'ask', ...extra }); }
+async function start(extra = {}) { return post('tasks', { goal: '搜索键盘并读取价格', startURL: origin + '/demo', maxSteps: 20, permissionMode: 'ask', keepAlive: true, ...extra }); }
 async function settle() { if (agent.busy) { try { agent.control('stop'); } catch {} } await agent.promise; if (agent.browser) { agent.control('stop'); await until(() => !agent.browser); } }
 
 // Scripted OpenAI-compatible model: read_page → form_input → click → get_page_text → answer.

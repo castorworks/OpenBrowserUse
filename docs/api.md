@@ -43,7 +43,7 @@ curl "http://127.0.0.1:4319/v1/runs/$RUN_ID" \
 
 completed、failed、cancelled、interrupted 为终态。completed 的 `result.outcome` 仍为 unverified；最终文字不能代替业务结果核验。failed 的原因在 `error`。HTTP 错误为 `application/problem+json`，响应头 X-Request-ID 用于定位请求。
 
-续聊时向同一 Session 创建新 Run，仅传 goal。每轮保留独立 ID、结果、指标；不再覆盖前一轮。start_url 只允许首轮使用。模型与浏览器设置在会话关闭前不能修改。
+默认 `keep_alive: false`，任务进入终态后自动关闭浏览器会话并继续队列，结果和历史仍可查询、导出。关闭完成前执行位置仍被占用，可轮询 Session 的 `status: closed`。需要续聊时，创建 Session 时显式传 `keep_alive: true`，再向同一 Session 创建新 Run，仅传 goal。每轮保留独立 ID、结果、指标；不再覆盖前一轮。start_url 只允许首轮使用。模型与浏览器设置在会话关闭前不能修改。
 
 ## 已实现端点
 
@@ -52,7 +52,7 @@ completed、failed、cancelled、interrupted 为终态。completed 的 `result.o
 | 端点 | 用途 |
 |---|---|
 | GET /status | 状态、当前占用、能力与请求体上限 |
-| POST /sessions | 创建会话；browser_mode 必须匹配服务端配置，permission_mode 为 ask/auto/skip，默认 skip |
+| POST /sessions | 创建会话；browser_mode 必须匹配服务端配置，permission_mode 为 ask/auto/skip，默认 skip；keep_alive 默认 false |
 | GET /sessions | 会话列表 |
 | GET /sessions/{id} | 会话详情 |
 | POST /sessions/{id}/runs | 首轮目标或后续目标 |
@@ -139,7 +139,9 @@ curl http://127.0.0.1:4319/v1/jobs \
 
 排队任务完成、失败或取消后，调度器自动关闭它的浏览器并启动下一项。等待人工回复、审批或暂停时不会跳过它。任务管理的会话不能另建续聊 Run；需续聊时使用普通交互会话，或在任务完成后恢复检查点。队列满时返回 409 queue_full，默认最多等待 100 项。
 
-桌面的“加入队列”可以直接提交任务，浏览器下方可查看和取消任务。已有交互会话会阻塞队列，请关闭该会话，或等待闲置超时自动关闭。
+桌面的“加入队列”可以直接提交任务，浏览器下方可查看和取消任务。普通任务默认结束后自动释放执行位置。显式保留的会话会阻塞队列，请关闭该会话，或等待闲置超时自动关闭。桌面勾选“任务结束后保留会话”仅用于直接开始的任务，队列任务始终自动关闭。
+
+恢复接口也支持 `keep_alive`，默认 false。桌面恢复历史任务时沿用该会话之前的保留选择。
 
 ## 会话清理
 
@@ -149,7 +151,7 @@ curl http://127.0.0.1:4319/v1/jobs \
 {"history_retention_days":30,"idle_timeout_seconds":900,"max_queued_jobs":100}
 ```
 
-history_retention_days 默认 0，表示永久保留；非零时自动删除到期的已关闭会话、执行、事件、队列记录和检查点（包括旧桌面历史）。idle_timeout_seconds 默认 900；0 禁用，执行中、暂停、等待用户或审批不会被当作闲置。清理检查约每 5 秒一次，GET 查询不会延长闲置期限。
+history_retention_days 默认 0，表示永久保留；非零时自动删除到期的已关闭会话、执行、事件、队列记录和检查点（包括旧桌面历史）。idle_timeout_seconds 默认 900，适用于显式保留或尚未启动任务的会话；0 仅禁用闲置超时，不影响默认任务结束后的自动关闭。执行中、暂停、等待用户或审批不会被当作闲置。清理检查约每 5 秒一次，GET 查询不会延长闲置期限。
 
 DELETE /sessions/{id} 仅允许已关闭会话；排队或执行中的任务应先取消。删除响应为 204，相同删除请求可安全重试；与已删除资源关联的旧创建/控制请求 key 返回 410 resource_deleted，不会重新创建资源。已打开的历史事件流会结束。幂等墓碑保留，避免旧请求复活已清理数据。
 
