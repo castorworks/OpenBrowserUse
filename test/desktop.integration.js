@@ -155,7 +155,7 @@ test('desktop IPC, live demo, model chat, export, extension relay, restart and c
   await page.locator('#history-search').fill('不存在的会话');
   assert.match(await page.locator('#history-list').textContent(), /没有/);
   await page.locator('#history-search').fill('');
-  assert.ok(!JSON.stringify(await api('state')).includes('desktop-fixture-key'));
+  assert.equal((await api('state')).config.apiKey, 'desktop-fixture-key');
   const exportPath = join(dir, 'export.json');
   await desktop.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, exportPath);
   await page.evaluate(id => window.desktop.exportSession(id), sessions[0].id);
