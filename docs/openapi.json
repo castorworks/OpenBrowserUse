@@ -2002,7 +2002,7 @@
       "get": {
         "operationId": "exportSession",
         "summary": "exportSession",
-        "description": "Complete redacted JSON including events, checkpoints and archives; no screenshot or model configuration.",
+        "description": "Complete JSON including events, checkpoints and archives; no screenshot or model configuration.",
         "parameters": [
           {
             "name": "session_id",

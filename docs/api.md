@@ -61,7 +61,7 @@ completed、failed、cancelled、interrupted 为终态。completed 的 `result.o
 | DELETE /sessions/{id} | 删除已关闭会话、执行、事件、存档；相关幂等请求保留为墓碑 |
 | GET /sessions/{id}/screenshot | 新鲜截图，`format=jpeg`（默认）或 `png` |
 | GET /sessions/{id}/cursor | 最新代理光标位置和反馈，不含输入内容 |
-| GET /sessions/{id}/export | 完整脱敏 JSON 导出，响应为附件 |
+| GET /sessions/{id}/export | 完整 JSON 导出，响应为附件 |
 | GET /runs/{id}/events | 持久化事件分页，`after=序号`、`limit=1…400` |
 | GET /runs/{id}/events/stream | SSE 回放与实时订阅，支持 Last-Event-ID |
 | POST /jobs | 提交独立 FIFO 任务，分配 Job、Session 和 Run ID |
@@ -135,7 +135,7 @@ curl http://127.0.0.1:4319/v1/jobs \
 
 返回 202 Job，含 session_id、run_id，可立即订阅该 Run 的 SSE。Job.status 为 queued/running/completed/failed/cancelled/interrupted，run_status 提供实际执行状态（如 waiting_input）。任务按持久化的 queue_sequence FIFO 顺序启动，始终只有一个浏览器会话执行。每个任务使用独立会话上下文；persistent/extension 模式仍使用所配置的登录状态。
 
-提交时冻结服务端模型和浏览器配置。待执行的原始指令、配置使用 AES-256-GCM 加密存入数据库，密钥位于数据目录的 queue-key（仅本机用户可读写）；不要单独删除该密钥。队列原始负载在开始执行或取消时删除，公开记录仍经过脱敏。配置后来发生变化，不影响已经排队的任务。
+提交时冻结服务端模型和浏览器配置。待执行的原始指令、配置使用 AES-256-GCM 加密存入数据库，密钥位于数据目录的 queue-key（仅本机用户可读写）；不要单独删除该密钥。队列原始负载在开始执行或取消时删除，公开记录保留原始文字。配置后来发生变化，不影响已经排队的任务。
 
 排队任务完成、失败或取消后，调度器自动关闭它的浏览器并启动下一项。等待人工回复、审批或暂停时不会跳过它。任务管理的会话不能另建续聊 Run；需续聊时使用普通交互会话，或在任务完成后恢复检查点。队列满时返回 409 queue_full，默认最多等待 100 项。
 
@@ -159,7 +159,7 @@ DELETE /sessions/{id} 仅允许已关闭会话；排队或执行中的任务应�
 
 - 服务面向单租户调用，默认绑定 IPv4 loopback，可通过 OBU_API_HOST 设置外部监听地址；部署见 [服务部署](service.md)。除 /healthz 和 /readyz 的最小健康信息外，所有端点鉴权；来自网页的 Origin/Sec-Fetch-Site 请求被拒绝，不支持浏览器 CORS 客户端。Token 至少 32 个非空白字符。
 - HTTP JSON 请求体最大 8 MiB，内部桌面桥接也使用该上限；桌面自带后台的 IPC 不受 HTTP 请求体上限约束。
-- API 不返回模型 Key，输出及持久化记录经过现有脱敏逻辑；任意自由文本仍无法保证识别所有秘密。
+- 输出及持久化记录保留原始文字，桌面配置接口和状态响应包含已配置的模型 Key；会话导出仍不包含模型配置。
 - 已实现 SSE、HTTP 截图/导出/删除、FIFO 队列和生命周期管理。尚未提供多浏览器并发、Webhook、多用户或 SDK。
 
 测试范围与运行方法见 [开发与发布](development.md#测试范围)。

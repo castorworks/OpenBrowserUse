@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createApplication } from '../lib/application.js';
 import { ConfigStore } from '../lib/config-store.js';
 
-test('model credentials survive restart, remain private, and clear persistently', async () => {
+test('model credentials survive restart, remain available in configuration, and clear persistently', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'obu-config-'));
   let api;
   const open = async () => { api = createApplication({ env: {}, dataDir: dir }); };
@@ -15,7 +15,7 @@ test('model credentials survive restart, remain private, and clear persistently'
   const save = async body => {
     const response = await api.request('POST', '/api/config', body);
     assert.equal(response.status, 200);
-    assert.ok(!JSON.stringify(response.body).includes('fixture-secret'));
+    assert.equal(response.body.apiKey, (await disk()).apiKey);
     return response.body;
   };
   const disk = async () => JSON.parse(await readFile(join(dir, 'model-config.json'), 'utf8'));
@@ -26,7 +26,7 @@ test('model credentials survive restart, remain private, and clear persistently'
     assert.equal((await disk()).apiKey, 'fixture-secret');
     await close(); await open();
     const restored = await state();
-    assert.equal(restored.hasKey, true); assert.equal(restored.apiKey, undefined);
+    assert.equal(restored.hasKey, true); assert.equal(restored.apiKey, 'fixture-secret');
     assert.equal(restored.provider, 'deepseek'); assert.equal(restored.baseURL, 'https://api.deepseek.com');
     assert.equal(restored.model, model.model); assert.equal(restored.effort, 'max'); assert.equal(restored.vision, true);
     await save({ ...model, apiKey: '' });

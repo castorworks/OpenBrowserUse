@@ -23,7 +23,7 @@ test('desktop-only runtime rejects HTTP, fallback port is propagated, subscripti
   const unsubscribe = runtime.api.subscribe((event) => { if (event === 'state') changes++; });
   const config = { provider: 'openai', baseURL: 'http://localhost:1234', model: 'fixture', apiKey: 'fixture-key', vision: false };
   const saved = await runtime.api.request('POST', '/api/config', config);
-  assert.equal(saved.status, 200); assert.equal(saved.body.hasKey, true); assert.equal(saved.body.apiKey, undefined);
+  assert.equal(saved.status, 200); assert.equal(saved.body.hasKey, true); assert.equal(saved.body.apiKey, 'fixture-key');
   await new Promise(r => setImmediate(r)); assert.ok(changes >= 2);
   unsubscribe(); const before = changes;
   await runtime.api.request('POST', '/api/config', { ...config, model: 'other' });

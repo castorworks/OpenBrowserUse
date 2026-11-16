@@ -13,7 +13,7 @@ async function fixture(t, maxSteps = 2) {
   const a = new Agent('http://localhost', { dataDir: dir });
   a.task = { id: crypto.randomUUID(), goal: 'test', mode: 'ai', provider: 'openai', permissionMode: 'skip',
     status: 'running', step: 0, modelTurns: 0, maxSteps, events: [], history: [], audit: [], userMessages: [],
-    metrics: { requests: [], tools: [], retries: 0 }, _secrets: new Set(), controller: new AbortController() };
+    metrics: { requests: [], tools: [], retries: 0 }, controller: new AbortController() };
   a.refreshView = async () => {};
   a.browser = { current: () => ({ url: () => 'https://example.com' }), tabs: () => [] };
   t.after(async () => { a.sessions.close(); await rm(dir, { recursive: true, force: true }); });
@@ -85,7 +85,7 @@ test('checkpoints exist before a pending model response; deletion cannot be undo
   assert.equal(await a.sessions.get(a.task.id), null);
 });
 
-test('sensitive inputs reach the browser but never public state or persisted transcripts', async t => {
+test('password inputs retain their original values in browser, state and transcripts', async t => {
   const a = await fixture(t);
   const secret = 'private-credential-123'.repeat(100);
   let filled;
@@ -96,24 +96,25 @@ test('sensitive inputs reach the browser but never public state or persisted tra
   a.event(`echo ${secret}`);
   await a.save();
   assert.equal(filled, secret);
-  assert.ok(!JSON.stringify(a.state()).includes(secret));
-  assert.ok(!JSON.stringify(await a.sessions.get(a.task.id)).includes(secret));
+  assert.equal(a.state().history[0].input.value, secret);
+  assert.equal(a.state().controller, undefined);
+  assert.equal((await a.sessions.get(a.task.id)).history[0].input.value, secret);
   const raw = (await a.sessions.db()).prepare('SELECT data FROM sessions WHERE id = ?').get(a.task.id).data;
-  assert.ok(!raw.includes(secret));
-  assert.ok(!raw.includes(secret.slice(0, 30)), 'clipping must not expose a prefix of a long password');
-  assert.ok(!raw.includes('_secrets'));
+  assert.ok(raw.includes(secret));
+  assert.ok(a.state({ compact: true }).events.some(e => e.input?.includes(secret.slice(0, 30))));
+  assert.ok(!raw.includes('controller'));
 });
 
-test('legacy labelled credentials are sanitized on database open without changing timestamps', async t => {
+test('legacy labelled credentials and timestamps remain unchanged on database open', async t => {
   const a = await fixture(t);
   a.task.goal = 'password: legacy-secret'; a.task.result = 'legacy-secret';
   const db = await a.sessions.db();
-  db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)').run(a.task.id, a.task.goal, 'done', 'openai', 'old', 'old', JSON.stringify({ ...a.task, _secrets: undefined }));
+  db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)').run(a.task.id, a.task.goal, 'done', 'openai', 'old', 'old', JSON.stringify(a.task));
   a.sessions.close();
   a.sessions = new SessionStore({ dir: a.sessions.dir });
-  assert.ok(!JSON.stringify(await a.sessions.get(a.task.id)).includes('legacy-secret'));
+  assert.equal((await a.sessions.get(a.task.id)).result, 'legacy-secret');
   const [row] = await a.sessions.list();
-  assert.equal(row.updated, 'old'); assert.ok(!row.goal.includes('legacy-secret'));
+  assert.equal(row.updated, 'old'); assert.equal(row.goal, 'password: legacy-secret');
 });
 
 test('live frames avoid duplicate screenshots and stale frames trigger a fallback', async t => {

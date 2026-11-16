@@ -152,6 +152,7 @@ test('read_page reaches iframes and shadow DOM; refs stay stable and act across 
     await getTool('computer').run({ action: 'type', text: 'y' }, { browser: session });
     await getTool('computer').run({ action: 'type', ref: pw, text: 'z' }, { browser: session });
     assert.equal(await session.current().locator('#p').inputValue(), 'xyz');
+    assert.match((await getTool('read_page').run({ filter: 'interactive', max_chars: 2000 }, { browser: session })).text, /xyz/);
     await session.current().setContent('<input type="file" id="upload">');
     const uploadRef = /ref_\d+/.exec((await getTool('read_page').run({ filter: 'interactive', max_chars: 2000 }, { browser: session })).text)[0];
     await getTool('form_input').run({ ref: uploadRef, value: new URL('../package.json', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, '$1') }, { browser: session });
@@ -244,11 +245,11 @@ test('removed browser mode is rejected before launching a browser', () => {
   assert.throws(() => new BrowserSession({ mode: 'cdp' }), /浏览器模式不受支持/);
 });
 
-test('application validates input and never returns a configured key', async () => {
+test('application validates input and returns the configured key', async () => {
   assert.equal((await post('tasks', { goal: '' })).status, 400);
   assert.equal((await post('config', { provider: 'anthropic', model: 'removed-model' })).status, 400);
   await configureOpenAI();
-  assert.ok(!JSON.stringify((await get('state')).body).includes('test-secret'));
+  assert.equal((await get('state')).body.config.apiKey, 'test-secret');
   const changed = await post('config', { provider: 'openai', baseURL: `http://127.0.0.1:${openaiPort}/other`, model: 'test', apiKey: '' });
   assert.equal(changed.body.hasKey, false);
   await configureOpenAI();

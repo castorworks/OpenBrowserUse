@@ -13,7 +13,7 @@ async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'obu-long-'));
   const store = new SessionStore({ dir });
   t.after(async () => { store.close(); await rm(dir, { recursive: true, force: true }); });
-  const task = { id: crypto.randomUUID(), goal: 'test', mode: 'ai', provider: 'openai', status: 'running', events: [], history: [], audit: [], userMessages: [], metrics: { requests: [], tools: [], retries: 0 }, _secrets: new Set() };
+  const task = { id: crypto.randomUUID(), goal: 'test', mode: 'ai', provider: 'openai', status: 'running', events: [], history: [], audit: [], userMessages: [], metrics: { requests: [], tools: [], retries: 0 } };
   return { dir, store, task };
 }
 
@@ -51,7 +51,7 @@ test('oversized immutable overhead stops locally without retrying', async () => 
   await assert.rejects(context.prepare([{ role: 'user', content: 'goal' }], { system: 's'.repeat(18000) }, signal()), e => e.nonRetryable);
 });
 
-test('incremental checkpoints survive restart, paginate, update cards, scrub newly learned secrets and delete archives', async t => {
+test('incremental checkpoints survive restart, paginate, update cards, preserve labelled credentials and delete archives', async t => {
   const { store, task } = await fixture(t);
   task.events = Array.from({ length: 500 }, (_, i) => ({ message: `event ${i}`, state: 'running' }));
   await store.save(task);
@@ -61,10 +61,11 @@ test('incremental checkpoints survive restart, paginate, update cards, scrub new
   await store.save(task);
   const raw = (await store.db()).prepare('SELECT data FROM sessions WHERE id = ?').get(task.id).data;
   assert.ok(!raw.includes('event 400'));
-  assert.ok(!(await store.readMemory(task.id, { id })).includes('unknown-credential'));
+  assert.equal(JSON.parse(await store.readMemory(task.id, { id })).text, 'old unknown-credential marker');
   store.close();
   const saved = await store.get(task.id);
   assert.equal(saved.events.length, 501);
+  assert.equal(saved.events[500].message, 'password: unknown-credential');
   assert.equal(saved.events[499].state, 'ok');
   const page = await store.page(task.id, 400, 100);
   assert.equal(page.events.length, 100); assert.equal(page.nextOffset, 500);
@@ -113,7 +114,7 @@ test('truncated tool calls can be followed by another valid request without orph
   const { dir } = await fixture(t);
   const agent = new Agent('http://localhost', { dataDir: dir });
   t.after(() => agent.sessions.close());
-  agent.task = { id: crypto.randomUUID(), goal: 'test', mode: 'ai', provider: 'openai', status: 'running', step: 0, modelTurns: 0, events: [], history: [], audit: [], userMessages: [], metrics: { requests: [], tools: [], retries: 0 }, controller: new AbortController(), _secrets: new Set() };
+  agent.task = { id: crypto.randomUUID(), goal: 'test', mode: 'ai', provider: 'openai', status: 'running', step: 0, modelTurns: 0, events: [], history: [], audit: [], userMessages: [], metrics: { requests: [], tools: [], retries: 0 }, controller: new AbortController() };
   agent.browser = {};
   agent.provider = new OpenAIProvider({ baseURL: 'http://localhost', model: 'mock' }, { system: 's', tools: [] });
   let calls = 0;

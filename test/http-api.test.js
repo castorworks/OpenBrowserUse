@@ -153,17 +153,27 @@ test('retained sessions keep follow-ups available and hold queued work until clo
 test('HTTP interactions require the exact pending ID and reject stale replies', async t => {
   const { call, runtime, question } = await fixture(t); question();
   const s = (await call('POST', '/sessions', {})).body;
-  const r = (await call('POST', `/sessions/${s.id}/runs`, { goal: 'ask a question' })).body;
+  const goal = 'password: original-goal-credential';
+  const r = (await call('POST', `/sessions/${s.id}/runs`, { goal })).body;
+  assert.equal(r.goal, goal);
   await until(async () => (await call('GET', `/runs/${r.id}`)).body.status === 'waiting_input');
   await runtime.api.tasks.serialize(() => runtime.api.tasks.lifecycle.tick(Date.now() + 86400000));
   assert.equal((await call('GET', `/sessions/${s.id}`)).body.status, 'open');
   const i = (await call('GET', `/runs/${r.id}/interactions?status=pending`)).body.data[0];
   assert.equal((await call('POST', `/runs/${r.id}/resume`, {})).status, 409);
   assert.equal((await runtime.api.request('POST', '/api/control', { command: 'resume', answer: 'missing id' })).status, 409);
-  assert.equal((await call('POST', `/runs/${r.id}/interactions/${i.id}/response`, { answer: 'yes' }, 'answer-1')).status, 200);
-  assert.equal((await call('POST', `/runs/${r.id}/interactions/${i.id}/response`, { answer: 'yes' }, 'answer-1')).status, 200);
+  const answer = 'api_key: original-answer-credential';
+  const response = await call('POST', `/runs/${r.id}/interactions/${i.id}/response`, { answer }, 'answer-1');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.response.answer, answer);
+  assert.deepEqual((await call('POST', `/runs/${r.id}/interactions/${i.id}/response`, { answer }, 'answer-1')).body, response.body);
   assert.equal((await call('POST', `/runs/${r.id}/interactions/${i.id}/response`, { answer: 'late' })).status, 409);
   await until(async () => (await call('GET', `/runs/${r.id}`)).body.status === 'completed');
+  const exported = (await call('GET', `/sessions/${s.id}/export`)).body;
+  assert.equal(exported.runs[0].goal, goal);
+  assert.equal(exported.checkpoint.goal, goal);
+  assert.equal(exported.interactions[0].response.answer, answer);
+  assert.equal(exported.events.find(e => e.type === 'interaction.resolved').data.response.answer, answer);
 });
 
 test('interrupted acceptances survive restart and are not executed again', async t => {
