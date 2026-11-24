@@ -51,6 +51,8 @@ Key 以明文保存在本机 `model-config.json`，写入时使用文件权限 `
 | `OBU_DATA_DIR` | `~/.openbrowseruse`，应用数据目录 |
 | `OBU_WORKBENCH_ORIGIN` | MCP 的管理地址保护配置，默认 `http://127.0.0.1:4318`（设置 `PORT` 时随之改变） |
 
+自动化痕迹：`ephemeral` / `persistent` 启动浏览器时去掉 `--enable-automation`，并加入 `--disable-blink-features=AutomationControlled`，网页读到的 `navigator.webdriver` 为 `false`；无界面运行时 User-Agent 里的 `HeadlessChrome` 改为 `Chrome`（首次启动无界面浏览器时会多启动一次来读取版本）。读取页面时注入的状态以随机名称、不可枚举方式保存，每次进程启动都不同。`extension` 使用你自己的 Chrome，不改变其指纹。已知仍可见的痕迹：为拦截管理地址而启用的请求路由会让 Chrome 禁用缓存，请求带 `Cache-Control: no-cache` 与 `Pragma: no-cache`；固定 1280×800 视口、禁用 Service Worker；扩展附加调试器时 Chrome 窗口会显示调试提示条（网页读不到）。
+
 `~` 表示当前用户目录；Windows 默认位于用户主目录下的 `.openbrowseruse`。**修改 `OBU_DATA_DIR` 不会改变默认 `BROWSER_PROFILE_DIR`**。多个实例必须分开应用数据目录，也不能同时打开同一个持久化浏览器目录。
 
 应用数据包括 `model-config.json`、`sessions.db`、`queue-key`、`permissions.json` 和运行时锁。运行中的 HTTP 服务还会写入 `runtime-service.json`，其中包含本机地址和 API Token，并同步发布到 `~/.openbrowseruse/services/relay-<中继端口>.json`，供同一用户的 Electron 跨数据目录自动连接；文件以 `0600` 创建，正常停止时删除，不应分享或提交仓库。Windows 文件访问依赖用户目录 ACL。备份时先停止拥有数据的后台，再保存数据目录；需要登录状态时另行备份浏览器配置目录。队列负载使用 `queue-key` 加密，不要只备份数据库或单独删除密钥。
